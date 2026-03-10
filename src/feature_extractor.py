@@ -1,0 +1,692 @@
+"""Feature extraction pipeline.
+
+Three layers:
+  A  – instantaneous derived values (derivatives, heading-COG, etc.)
+  B  – rolling-window motion statistics (RMS, PSD, spectral entropy, …)
+  C  – inferred wave-motion proxies (severity, direction, regularity, trend)
+
+All signal-processing code is isolated here so it can be swapped for
+optimised implementations without touching the rest of the pipeline.
+
+IMPORTANT DOMAIN NOTE:
+  All outputs are inferences about vessel motion response to sea state.
+  They are NOT direct measurements of wave height, direction, or period.
+"""
+from __future__ import annotations
+
+import logging
+import math
+from collections import deque
+from datetime import datetime, timezone
+from typing import Any, Deque, Dict, List, Optional, Tuple
+
+import numpy as np
+from scipy import signal as scipy_signal
+from scipy.stats import kurtosis as scipy_kurtosis
+
+from config import Config, DEFAULT_CONFIG
+from models import InstantSample, LayerAFeatures, MotionEstimate, WindowFeatures
+
+logger = logging.getLogger(__name__)
+
+
+# --------------------------------------------------------------------------- #
+# Low-level signal-processing utilities                                        #
+# --------------------------------------------------------------------------- #
+
+def _rms(x: np.ndarray) -> float:
+    return float(np.sqrt(np.mean(x ** 2)))
+
+
+def _crest_factor(x: np.ndarray) -> Optional[float]:
+    r = _rms(x)
+    if r == 0:
+        return None
+    return float(np.max(np.abs(x)) / r)
+
+
+def _zero_crossing_period(x: np.ndarray, fs: float) -> Optional[float]:
+    """Estimate dominant period from zero-crossings of a mean-removed signal."""
+    x = x - np.mean(x)
+    if len(x) < 4:
+        return None
+    signs = np.sign(x)
+    signs[signs == 0] = 1
+    diff = np.diff(signs)
+    crossings = np.where(diff != 0)[0]
+    if len(crossings) < 2:
+        return None
+    intervals = np.diff(crossings) / fs
+    # Period = 2 × mean half-period
+    return float(2.0 * np.mean(intervals))
+
+
+def _welch_dominant(
+    x: np.ndarray, fs: float, min_samples: int = 16
+) -> Tuple[Optional[float], Optional[float], Optional[np.ndarray], Optional[np.ndarray]]:
+    """
+    Compute Welch PSD for x sampled at fs Hz.
+
+    Returns (dominant_freq, confidence, freqs, psd).
+    confidence is based on peak-to-mean power ratio, normalised to [0, 1].
+    DC component is excluded from peak search.
+    """
+    if len(x) < min_samples:
+        return None, None, None, None
+
+    nperseg = min(len(x) // 2, 64)
+    nperseg = max(nperseg, 4)
+
+    try:
+        freqs, psd = scipy_signal.welch(x - np.mean(x), fs=fs, nperseg=nperseg)
+    except Exception:
+        return None, None, None, None
+
+    if psd.sum() == 0:
+        return None, 0.0, freqs, psd
+
+    # Exclude DC (index 0)
+    psd_no_dc = psd.copy()
+    psd_no_dc[0] = 0.0
+
+    if psd_no_dc.max() == 0:
+        return None, 0.0, freqs, psd
+
+    idx = int(np.argmax(psd_no_dc))
+    dom_freq = float(freqs[idx])
+    peak = float(psd_no_dc[idx])
+    mean_power = float(psd_no_dc.mean()) + 1e-12
+    # Normalise: confidence saturates at 10× peak-to-mean
+    confidence = min(1.0, (peak / mean_power) / 10.0)
+
+    return dom_freq, confidence, freqs, psd
+
+
+def _spectral_entropy(psd: np.ndarray) -> float:
+    """Shannon entropy of normalised PSD (nats)."""
+    p = psd / (psd.sum() + 1e-12)
+    p = p[p > 0]
+    return float(-np.sum(p * np.log(p)))
+
+
+def _spectral_energy_bands(
+    freqs: np.ndarray,
+    psd: np.ndarray,
+    bands: List[Tuple[float, float]],
+) -> Dict[str, float]:
+    """Integrate PSD energy within each frequency band."""
+    total = psd.sum() + 1e-12
+    result = {}
+    for lo, hi in bands:
+        mask = (freqs >= lo) & (freqs < hi)
+        label = f"{lo:.2f}-{hi:.2f}Hz"
+        result[label] = float(psd[mask].sum() / total)
+    return result
+
+
+def _unwrap_angle(prev: Optional[float], curr: float) -> float:
+    """Unwrap a single angle step to minimise discontinuity (radians)."""
+    if prev is None:
+        return curr
+    diff = curr - prev
+    # Wrap diff to (-π, π]
+    diff = (diff + math.pi) % (2 * math.pi) - math.pi
+    return prev + diff
+
+
+def _moving_average(buf: Deque[float]) -> float:
+    return float(np.mean(list(buf)))
+
+
+# --------------------------------------------------------------------------- #
+# Feature extractor                                                            #
+# --------------------------------------------------------------------------- #
+
+class FeatureExtractor:
+    """
+    Stateful feature extractor.  Call add_sample() at the configured sample
+    rate.  The extractor maintains internal rolling buffers and returns
+    layer-A features immediately.  Rolling window features and motion
+    estimates are available via get_window_features() and get_motion_estimate().
+    """
+
+    def __init__(self, config: Config = DEFAULT_CONFIG) -> None:
+        self._config = config
+        self._fs = config.sample_rate_hz
+
+        # Rolling sample buffers keyed by window size in seconds
+        self._buffers: Dict[int, Deque[InstantSample]] = {
+            w: deque(maxlen=int(w * self._fs))
+            for w in config.rolling_windows_s
+        }
+
+        # Previous-sample state for derivative computation
+        self._prev_sample: Optional[InstantSample] = None
+        self._prev_roll_uw: Optional[float] = None   # unwrapped
+        self._prev_pitch_uw: Optional[float] = None
+        self._prev_yaw_uw: Optional[float] = None
+
+        # Derivative smoothing queues
+        def _dq() -> Deque[float]:
+            return deque(maxlen=config.derivative_filter_window)
+
+        self._roll_rate_buf: Deque[float] = _dq()
+        self._pitch_rate_buf: Deque[float] = _dq()
+        self._yaw_rate_buf: Deque[float] = _dq()
+        self._roll_acc_buf: Deque[float] = _dq()
+        self._pitch_acc_buf: Deque[float] = _dq()
+
+        self._prev_roll_rate: Optional[float] = None
+        self._prev_pitch_rate: Optional[float] = None
+
+        # Severity exponential smoothing state
+        self._severity_smoothed: float = 0.0
+
+        # Window period history for stability scoring
+        self._roll_period_history: Dict[int, Deque[float]] = {
+            w: deque(maxlen=5) for w in config.rolling_windows_s
+        }
+        self._pitch_period_history: Dict[int, Deque[float]] = {
+            w: deque(maxlen=5) for w in config.rolling_windows_s
+        }
+
+        # Trend: severity history keyed by window
+        self._severity_history: Deque[Tuple[datetime, float]] = deque(maxlen=int(30 * 60 * self._fs))
+
+    # ------------------------------------------------------------------ #
+    # Layer A                                                              #
+    # ------------------------------------------------------------------ #
+
+    def add_sample(self, sample: InstantSample) -> LayerAFeatures:
+        """
+        Ingest a new InstantSample.  Updates all rolling buffers and returns
+        instantaneous derived features.
+        """
+        for buf in self._buffers.values():
+            buf.append(sample)
+
+        features = self._compute_layer_a(sample)
+        self._prev_sample = sample
+        return features
+
+    def _compute_layer_a(self, sample: InstantSample) -> LayerAFeatures:
+        now = sample.timestamp
+        out = LayerAFeatures(timestamp=now)
+
+        if self._prev_sample is None:
+            # First sample – just unwrap angles and return empty derivatives
+            if sample.roll is not None:
+                self._prev_roll_uw = sample.roll
+            if sample.pitch is not None:
+                self._prev_pitch_uw = sample.pitch
+            if sample.yaw is not None:
+                self._prev_yaw_uw = sample.yaw
+            return out
+
+        dt = (now - self._prev_sample.timestamp).total_seconds()
+        if dt <= 0:
+            return out
+
+        # ---- unwrap and differentiate roll ---- #
+        if sample.roll is not None and self._prev_roll_uw is not None:
+            roll_uw = _unwrap_angle(self._prev_roll_uw, sample.roll)
+            raw_rate = (roll_uw - self._prev_roll_uw) / dt
+            self._roll_rate_buf.append(raw_rate)
+            smoothed_rate = _moving_average(self._roll_rate_buf)
+            out.roll_rate = smoothed_rate
+            self._prev_roll_uw = roll_uw
+
+            if self._prev_roll_rate is not None:
+                raw_acc = (smoothed_rate - self._prev_roll_rate) / dt
+                self._roll_acc_buf.append(raw_acc)
+                out.roll_acceleration = _moving_average(self._roll_acc_buf)
+            self._prev_roll_rate = smoothed_rate
+        elif sample.roll is not None:
+            self._prev_roll_uw = sample.roll
+
+        # ---- unwrap and differentiate pitch ---- #
+        if sample.pitch is not None and self._prev_pitch_uw is not None:
+            pitch_uw = _unwrap_angle(self._prev_pitch_uw, sample.pitch)
+            raw_rate = (pitch_uw - self._prev_pitch_uw) / dt
+            self._pitch_rate_buf.append(raw_rate)
+            smoothed_rate = _moving_average(self._pitch_rate_buf)
+            out.pitch_rate = smoothed_rate
+            self._prev_pitch_uw = pitch_uw
+
+            if self._prev_pitch_rate is not None:
+                raw_acc = (smoothed_rate - self._prev_pitch_rate) / dt
+                self._pitch_acc_buf.append(raw_acc)
+                out.pitch_acceleration = _moving_average(self._pitch_acc_buf)
+            self._prev_pitch_rate = smoothed_rate
+        elif sample.pitch is not None:
+            self._prev_pitch_uw = sample.pitch
+
+        # ---- unwrap and differentiate yaw ---- #
+        if sample.yaw is not None and self._prev_yaw_uw is not None:
+            yaw_uw = _unwrap_angle(self._prev_yaw_uw, sample.yaw)
+            raw_rate = (yaw_uw - self._prev_yaw_uw) / dt
+            self._yaw_rate_buf.append(raw_rate)
+            out.yaw_rate_derived = _moving_average(self._yaw_rate_buf)
+            self._prev_yaw_uw = yaw_uw
+        elif sample.yaw is not None:
+            self._prev_yaw_uw = sample.yaw
+
+        # ---- heading minus COG (leeway/drift proxy) ---- #
+        if sample.heading is not None and sample.cog is not None:
+            diff = sample.heading - sample.cog
+            # Wrap to (-π, π]
+            diff = (diff + math.pi) % (2 * math.pi) - math.pi
+            out.heading_minus_cog = diff
+
+        # ---- wind angles relative to bow (heading) ---- #
+        heading_ref = sample.heading if sample.heading is not None else sample.cog
+        if heading_ref is not None and sample.wind_angle_true is not None:
+            out.wind_angle_true_bow = _angle_relative_to_bow(
+                sample.wind_angle_true, heading_ref
+            )
+        if heading_ref is not None and sample.wind_angle_apparent is not None:
+            out.wind_angle_apparent_bow = _angle_relative_to_bow(
+                sample.wind_angle_apparent, heading_ref
+            )
+
+        # ---- speed-normalized roll / pitch ---- #
+        if sample.roll is not None and sample.sog is not None and sample.sog > 0.5:
+            out.roll_normalized = sample.roll / sample.sog
+        if sample.pitch is not None and sample.sog is not None and sample.sog > 0.5:
+            out.pitch_normalized = sample.pitch / sample.sog
+
+        return out
+
+    # ------------------------------------------------------------------ #
+    # Layer B                                                              #
+    # ------------------------------------------------------------------ #
+
+    def get_window_features(self, window_s: int) -> Optional[WindowFeatures]:
+        """Compute rolling-window statistics for the given window size."""
+        buf = self._buffers.get(window_s)
+        if buf is None or len(buf) < max(4, int(window_s * self._fs * 0.25)):
+            return None
+
+        samples = list(buf)
+        n = len(samples)
+        now = samples[-1].timestamp
+
+        def _arr(attr: str) -> np.ndarray:
+            vals = [getattr(s, attr) for s in samples if getattr(s, attr) is not None]
+            return np.array(vals, dtype=float)
+
+        roll = _arr("roll")
+        pitch = _arr("pitch")
+        rot = _arr("rate_of_turn")
+        sog = _arr("sog")
+        heading = _arr("heading")
+        cog = _arr("cog")
+        wst = _arr("wind_speed_true")
+        wat = _arr("wind_angle_true")
+
+        wf = WindowFeatures(timestamp=now, window_s=float(window_s), n_samples=n)
+
+        # ---- roll stats ---- #
+        if len(roll) >= 4:
+            wf.roll_mean = float(np.mean(roll))
+            wf.roll_std = float(np.std(roll))
+            wf.roll_rms = _rms(roll)
+            wf.roll_p2p = float(np.ptp(roll))
+            wf.roll_kurtosis = float(scipy_kurtosis(roll, fisher=True))
+            wf.roll_crest_factor = _crest_factor(roll)
+            wf.roll_zero_crossing_period = _zero_crossing_period(roll, self._fs)
+
+            dom_f, conf, freqs, psd = _welch_dominant(
+                roll, self._fs, self._config.psd_min_samples
+            )
+            wf.roll_dominant_freq = dom_f
+            wf.roll_period_confidence = conf
+            if dom_f and dom_f > 0:
+                wf.roll_dominant_period = 1.0 / dom_f
+            if psd is not None and freqs is not None:
+                wf.roll_spectral_energy = float(psd.sum())
+                wf.spectral_entropy_roll = _spectral_entropy(psd)
+                wf.spectral_bands_roll = _spectral_energy_bands(
+                    freqs, psd, self._config.freq_bands
+                )
+
+            # Period stability
+            if wf.roll_dominant_period is not None:
+                self._roll_period_history[window_s].append(wf.roll_dominant_period)
+            ph = list(self._roll_period_history[window_s])
+            if len(ph) >= 2:
+                wf.roll_period_stability = float(np.std(ph))
+
+        # ---- pitch stats ---- #
+        if len(pitch) >= 4:
+            wf.pitch_mean = float(np.mean(pitch))
+            wf.pitch_std = float(np.std(pitch))
+            wf.pitch_rms = _rms(pitch)
+            wf.pitch_p2p = float(np.ptp(pitch))
+            wf.pitch_kurtosis = float(scipy_kurtosis(pitch, fisher=True))
+            wf.pitch_crest_factor = _crest_factor(pitch)
+            wf.pitch_zero_crossing_period = _zero_crossing_period(pitch, self._fs)
+
+            dom_f, conf, freqs, psd = _welch_dominant(
+                pitch, self._fs, self._config.psd_min_samples
+            )
+            wf.pitch_dominant_freq = dom_f
+            wf.pitch_period_confidence = conf
+            if dom_f and dom_f > 0:
+                wf.pitch_dominant_period = 1.0 / dom_f
+            if psd is not None and freqs is not None:
+                wf.pitch_spectral_energy = float(psd.sum())
+                wf.spectral_entropy_pitch = _spectral_entropy(psd)
+                wf.spectral_bands_pitch = _spectral_energy_bands(
+                    freqs, psd, self._config.freq_bands
+                )
+
+            if wf.pitch_dominant_period is not None:
+                self._pitch_period_history[window_s].append(wf.pitch_dominant_period)
+            ph = list(self._pitch_period_history[window_s])
+            if len(ph) >= 2:
+                wf.pitch_period_stability = float(np.std(ph))
+
+        # ---- cross-signal variance ---- #
+        if len(rot) >= 2:
+            wf.yaw_rate_var = float(np.var(rot))
+        if len(sog) >= 2:
+            wf.sog_var = float(np.var(sog))
+        if len(heading) >= 2 and len(cog) >= 2:
+            min_len = min(len(heading), len(cog))
+            diff = np.array(
+                [_angle_wrap(h - c) for h, c in zip(heading[-min_len:], cog[-min_len:])]
+            )
+            wf.heading_cog_var = float(np.var(diff))
+        if len(wst) >= 2:
+            wf.wind_speed_var = float(np.var(wst))
+        if len(wat) >= 2:
+            wf.wind_angle_var = float(np.var(wat))
+
+        return wf
+
+    # ------------------------------------------------------------------ #
+    # Layer C                                                              #
+    # ------------------------------------------------------------------ #
+
+    def get_motion_estimate(
+        self,
+        window_s: int = 60,
+        short_window_s: int = 10,
+    ) -> Optional[MotionEstimate]:
+        """
+        Compute inferred wave-motion proxies from rolling-window features.
+
+        These are inferences about vessel motion response only.
+        """
+        wf = self.get_window_features(window_s)
+        if wf is None:
+            return None
+
+        now = wf.timestamp
+        me = MotionEstimate(timestamp=now, window_s=float(window_s))
+
+        # ---- motion severity ---- #
+        severity = self._compute_severity(wf)
+        me.motion_severity = severity
+        alpha = self._config.severity_smoothing_alpha
+        self._severity_smoothed = (
+            alpha * severity + (1 - alpha) * self._severity_smoothed
+        )
+        me.motion_severity_smoothed = self._severity_smoothed
+
+        # Record for trend
+        self._severity_history.append((now, severity))
+
+        # ---- motion regime ---- #
+        me.motion_regime = _regime_label(self._severity_smoothed)
+
+        # ---- dominant periods ---- #
+        me.dominant_roll_period = wf.roll_dominant_period
+        me.dominant_pitch_period = wf.pitch_dominant_period
+        roll_conf = wf.roll_period_confidence or 0.0
+        pitch_conf = wf.pitch_period_confidence or 0.0
+        me.period_confidence = float(max(roll_conf, pitch_conf))
+
+        # Combined encounter period (weighted average if both present)
+        rp = wf.roll_dominant_period
+        pp = wf.pitch_dominant_period
+        if rp and pp:
+            # Weight by spectral energy
+            re = wf.roll_spectral_energy or 1.0
+            pe = wf.pitch_spectral_energy or 1.0
+            me.encounter_period_estimate = (rp * re + pp * pe) / (re + pe)
+        elif rp:
+            me.encounter_period_estimate = rp
+        elif pp:
+            me.encounter_period_estimate = pp
+
+        # ---- encounter direction proxy ---- #
+        direction, dir_conf, roll_dom = _estimate_encounter_direction(wf)
+        me.encounter_direction = direction
+        me.direction_confidence = dir_conf
+        me.roll_dominant = roll_dom
+
+        # ---- regularity / confusion ---- #
+        me.confusion_index, me.motion_regularity = _estimate_regularity(wf)
+
+        # ---- comfort proxy ---- #
+        me.comfort_proxy = _comfort_proxy(wf, self._severity_smoothed)
+
+        # ---- trend ---- #
+        me.severity_trend = self._estimate_trend(now)
+
+        # ---- overall confidence ---- #
+        me.overall_confidence = _overall_confidence(wf, me)
+
+        return me
+
+    # ------------------------------------------------------------------ #
+    # Internal helpers                                                      #
+    # ------------------------------------------------------------------ #
+
+    def _compute_severity(self, wf: WindowFeatures) -> float:
+        cfg = self._config
+        scores: Dict[str, float] = {}
+
+        if wf.roll_rms is not None:
+            scores["roll_rms"] = min(1.0, wf.roll_rms / cfg.severity_roll_rms_max)
+        if wf.pitch_rms is not None:
+            scores["pitch_rms"] = min(1.0, wf.pitch_rms / cfg.severity_pitch_rms_max)
+        if wf.roll_spectral_energy is not None:
+            scores["roll_spectral"] = min(
+                1.0, wf.roll_spectral_energy / cfg.severity_roll_spectral_max
+            )
+        if wf.yaw_rate_var is not None:
+            scores["yaw_rate_var"] = min(
+                1.0, wf.yaw_rate_var / cfg.severity_yaw_rate_var_max
+            )
+
+        if not scores:
+            return 0.0
+
+        total_weight = sum(cfg.severity_weights.get(k, 0.0) for k in scores)
+        if total_weight == 0:
+            return 0.0
+
+        weighted = sum(
+            scores[k] * cfg.severity_weights.get(k, 0.0) for k in scores
+        )
+        return float(weighted / total_weight)
+
+    def _estimate_trend(self, now: datetime) -> str:
+        hist = list(self._severity_history)
+        if len(hist) < 10:
+            return "stable"
+
+        window_lengths = [
+            (5 * 60, 15 * 60),
+            (5 * 60, 30 * 60),
+        ]
+
+        def _mean_in_last(seconds: float) -> Optional[float]:
+            cutoff = now.timestamp() - seconds
+            vals = [v for t, v in hist if t.timestamp() >= cutoff]
+            return float(np.mean(vals)) if vals else None
+
+        short = _mean_in_last(5 * 60)
+        medium = _mean_in_last(15 * 60)
+        long_ = _mean_in_last(30 * 60)
+
+        if short is None or medium is None:
+            return "stable"
+
+        ref = long_ if long_ is not None else medium
+        delta = short - ref
+        if abs(delta) < 0.05:
+            return "stable"
+        return "worsening" if delta > 0 else "improving"
+
+    # ------------------------------------------------------------------ #
+    # Accessors                                                             #
+    # ------------------------------------------------------------------ #
+
+    def buffer_fill(self, window_s: int) -> int:
+        """Number of samples in the given window buffer."""
+        return len(self._buffers.get(window_s, deque()))
+
+    def buffer_capacity(self, window_s: int) -> int:
+        buf = self._buffers.get(window_s)
+        return buf.maxlen if buf is not None else 0
+
+
+# --------------------------------------------------------------------------- #
+# Module-level heuristic functions                                             #
+# --------------------------------------------------------------------------- #
+
+def _angle_relative_to_bow(angle_abs: float, heading: float) -> float:
+    """Convert an absolute wind angle (rad) to angle relative to bow."""
+    rel = angle_abs - heading
+    return _angle_wrap(rel)
+
+
+def _angle_wrap(a: float) -> float:
+    """Wrap angle to (-π, π]."""
+    return (a + math.pi) % (2 * math.pi) - math.pi
+
+
+def _regime_label(severity: float) -> str:
+    if severity < 0.2:
+        return "calm"
+    elif severity < 0.45:
+        return "moderate"
+    elif severity < 0.70:
+        return "active"
+    else:
+        return "heavy"
+
+
+def _estimate_encounter_direction(
+    wf: WindowFeatures,
+) -> Tuple[str, float, bool]:
+    """
+    Infer encounter direction proxy.
+    Returns (label, confidence, roll_dominant).
+    """
+    re = wf.roll_spectral_energy or 0.0
+    pe = wf.pitch_spectral_energy or 0.0
+    total = re + pe
+
+    if total < 1e-8:
+        return "unknown", 0.0, False
+
+    roll_dom = re > pe
+    ratio = (re - pe) / total  # -1 = pure pitch, +1 = pure roll
+    yaw_var = wf.yaw_rate_var or 0.0
+
+    # Base confidence on energy level
+    base_conf = min(1.0, math.sqrt(total) / 0.05)
+
+    # Check wind angle proxy: aft-quarter = |wind_angle_bow| > π/2
+    aft_quarter_wind = False
+    # (wind angle info is not in WindowFeatures directly)
+
+    if ratio > 0.4:
+        # Strong roll
+        if yaw_var > 0.001:
+            label = "quartering_like"
+            confidence = base_conf * 0.8
+        else:
+            label = "beam_like"
+            confidence = base_conf * 0.9
+    elif ratio < -0.4:
+        # Strong pitch
+        label = "head_or_following_like"
+        confidence = base_conf * 0.85
+    else:
+        # Mixed: check confusion indicators
+        confusion, _ = _estimate_regularity(wf)
+        if confusion > 0.5:
+            label = "confused_like"
+        else:
+            label = "mixed"
+        confidence = base_conf * 0.5
+
+    return label, float(np.clip(confidence, 0.0, 1.0)), roll_dom
+
+
+def _estimate_regularity(wf: WindowFeatures) -> Tuple[float, str]:
+    """
+    Return (confusion_index 0–1, label).
+    """
+    scores: List[float] = []
+
+    # Spectral entropy: high = confused
+    se_roll = wf.spectral_entropy_roll
+    se_pitch = wf.spectral_entropy_pitch
+    if se_roll is not None and se_pitch is not None:
+        # Normalise by log(n_freq) for the nperseg used; use a rough scale
+        entropy_norm = min(1.0, (se_roll + se_pitch) / 10.0)
+        scores.append(entropy_norm)
+
+    # Period instability
+    if wf.roll_period_stability is not None:
+        # Normalise by 5s (high instability = confused)
+        scores.append(min(1.0, wf.roll_period_stability / 5.0))
+    if wf.pitch_period_stability is not None:
+        scores.append(min(1.0, wf.pitch_period_stability / 5.0))
+
+    if not scores:
+        return 0.5, "unknown"
+
+    confusion = float(np.mean(scores))
+    if confusion < 0.30:
+        label = "regular"
+    elif confusion < 0.60:
+        label = "mixed"
+    else:
+        label = "confused"
+
+    return confusion, label
+
+
+def _comfort_proxy(wf: WindowFeatures, severity_smoothed: float) -> float:
+    """Simple comfort proxy 0 (comfortable) to 1 (very uncomfortable)."""
+    # Blend severity with crest factor penalty
+    cf_roll = wf.roll_crest_factor or 1.4
+    cf_pitch = wf.pitch_crest_factor or 1.4
+    cf_penalty = min(1.0, (max(cf_roll, cf_pitch) - 1.0) / 4.0)
+    return float(np.clip(0.7 * severity_smoothed + 0.3 * cf_penalty, 0.0, 1.0))
+
+
+def _overall_confidence(wf: WindowFeatures, me: MotionEstimate) -> float:
+    """Heuristic overall confidence 0–1 based on data completeness."""
+    checks = [
+        wf.roll_rms is not None,
+        wf.pitch_rms is not None,
+        wf.roll_dominant_period is not None,
+        wf.pitch_dominant_period is not None,
+        (wf.roll_period_confidence or 0) > 0.3,
+        (wf.pitch_period_confidence or 0) > 0.3,
+    ]
+    base = float(sum(checks)) / len(checks)
+
+    # Penalise high confusion
+    confusion = me.confusion_index or 0.5
+    penalised = base * (1.0 - 0.4 * confusion)
+    return float(np.clip(penalised, 0.0, 1.0))
