@@ -4,7 +4,42 @@
 
 `boat_state` is a Python 3.11+ prototype that connects to a Signal K marine server (`http://primrose.local:3000`), ingests **vessel self data only**, and derives inferred sea-state motion proxies from onboard attitude, movement, and wind sensors.
 
-> **Domain caution:** All outputs are *inferred motion proxies*, not direct wave measurements. Never describe outputs as authoritative wave height, direction, or period values.
+> **Domain caution:** All outputs are *inferred motion proxies*, not direct wave measurements — for now. The goal is to progressively add actual wave estimation (height, true period, direction) as described below.
+
+---
+
+## Project goals
+
+The end goal is a continuously-running **Home Assistant Add-on** that produces:
+
+1. **Sea state for logbook** — wave height, direction, period; ideally swell vs wind-wave separation; Douglas / Beaufort scale mapping.
+2. **Input for boat performance monitoring** — a future companion add-on will learn polar performance by correlating boat speed with wind and sea state. Reliable sea-state output from this project is a prerequisite.
+3. **Ground truth for weather routing** — compare observed conditions against forecast sea state.
+
+### Key reference: bareboat-necessities wave estimation
+
+The approach at <https://bareboat-necessities.github.io/my-bareboat/bareboat-math.html> is a primary reference. It describes:
+
+- **Trochoidal wave model** — reconstruct wave amplitude from max/min vertical acceleration + observed frequency.
+- **Kalman filter heave integration** — double-integrate vertical acceleration into displacement with zero-mean drift correction.
+- **Doppler correction** — convert encounter frequency to true wave frequency using `delta_v = SPD * cos(TWA)`.
+- **Aranovskiy online frequency estimator** as a lightweight alternative to FFT.
+
+### Current gaps to close (incremental)
+
+1. Derive speed through water (SPD) from heading–COG difference (data already available)
+2. Add Doppler correction to convert encounter periods to true wave periods
+3. Subscribe to accelerometer data (`navigation.acceleration` or raw IMU) if available on the Signal K server
+4. Implement trochoidal wave height estimation (requires accel data)
+5. Implement Kalman heave estimation (requires accel data)
+6. Report swell vs wind-wave components from existing spectral bands
+7. Map outputs to Douglas sea-state scale
+
+### Deployment target
+
+- **Home Assistant Add-on** running alongside the Signal K Add-on
+- Designed to stay independent of Signal K internals (WebSocket delta API is the only integration point)
+- May be converted to a Signal K plugin later, but the project should outlive any future SK migration
 
 ---
 

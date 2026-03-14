@@ -238,6 +238,49 @@ Design decisions that support this:
 
 ---
 
+## Project goals
+
+The end goal is a continuously-running sea-state monitor that produces data useful for:
+
+1. **Logbook entries** — sea state (Beaufort / Douglas scale), dominant wave direction, wave period, and ideally separate swell vs wind-wave components.
+2. **Boat performance monitoring** — a companion add-on will eventually learn polar performance by correlating boat speed with wind and sea state. Having reliable sea-state data from this project is a prerequisite.
+3. **Weather routing** — sea-state forecasts are only useful if the system can compare them against observed conditions. Continuous wave estimation provides the ground truth for that comparison.
+
+### Reference: bareboat-necessities wave estimation
+
+The approach described at <https://bareboat-necessities.github.io/my-bareboat/bareboat-math.html> is a key reference. It outlines two methods for estimating actual wave height from a moving boat:
+
+1. **Trochoidal wave model** — reconstruct wave amplitude from observed max/min vertical acceleration and wave frequency, using known trochoid geometry.
+2. **Kalman filter heave integration** — double-integrate vertical acceleration into displacement, with a zero-mean constraint on the third integral to prevent drift.
+
+Both methods require **Doppler correction**: the boat moves relative to wave fronts, so observed (encounter) frequency differs from true wave frequency. The correction uses `delta_v = SPD * cos(TWA)` (boat speed projected onto wave propagation direction) to recover the source wavelength from the observed frequency.
+
+### Current state vs bareboat-necessities approach
+
+What boat_state **already does well**:
+- Classification pipeline (severity, regime, direction, regularity, comfort, trend) — the bareboat article does not attempt this
+- Spectral band decomposition (0.05–0.1, 0.1–0.2, 0.2–0.4, 0.4–1.0 Hz) that can separate swell from wind waves
+- Robust reconnection, missing-data handling, and recording infrastructure
+
+What boat_state is **missing** for actual wave measurement:
+- No vertical acceleration data (would need `navigation.acceleration` or raw IMU from Signal K)
+- No Doppler correction — all period/frequency estimates are encounter values, not true wave values
+- No heave/displacement estimation (no Kalman filter or double integration)
+- No speed-through-water derivation (needed for Doppler correction, but could be computed from existing heading/COG/SOG data)
+- Head vs following seas are indistinguishable (the Doppler sign resolves this, but it is not implemented)
+
+### Incremental path forward
+
+1. Derive speed through water (SPD) from heading–COG difference (data already available)
+2. Add Doppler correction to convert encounter periods to true wave periods
+3. Subscribe to accelerometer data if available on the Signal K server
+4. Implement trochoidal wave height estimation (requires accel data)
+5. Implement Kalman heave estimation (requires accel data)
+6. Use spectral bands to report swell vs wind-wave components separately
+7. Map outputs to Douglas sea-state scale for logbook use
+
+---
+
 ## Future development
 
 1. **Clustering (Stage 2):** Use `features_60s.parquet` with KMeans / Gaussian Mixture / HDBSCAN to discover natural motion regimes.
@@ -246,3 +289,4 @@ Design decisions that support this:
 4. **Raspberry Pi 5 deployment:** The pipeline is async and has no macOS dependencies; deploy with the same `requirements.txt` on Pi OS.
 5. **Home Assistant Add-on packaging:** Dockerfile, `config.yaml`, and `options.json` for the HA Add-on store. Expose motion severity and regime as HA sensors via the Supervisor API or MQTT.
 6. **Signal K plugin (optional):** Wrap the core in a Signal K server plugin if tight integration is preferred. This is a packaging change only — the analysis code stays the same.
+7. **Polar performance companion:** A second add-on that correlates boat speed with wind and sea state to learn vessel polar performance over time. Depends on sea-state output from this project.
