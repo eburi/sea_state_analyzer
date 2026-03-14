@@ -18,13 +18,20 @@ from paths import (
     ATTITUDE_ROLL,
     ATTITUDE_YAW,
     ATTITUDE_SUBKEYS,
+    AUTOPILOT_STATE,
     COURSE_OVER_GROUND_TRUE,
+    CURRENT_DRIFT,
+    CURRENT_SET_TRUE,
+    DEPTH_BELOW_TRANSDUCER,
     HEADING_TRUE,
     POSITION,
     RATE_OF_TURN,
+    RUDDER_ANGLE,
     SPEED_OVER_GROUND,
+    SPEED_THROUGH_WATER,
     WIND_ANGLE_APPARENT,
     WIND_ANGLE_TRUE_WATER,
+    WIND_DIRECTION_TRUE,
     WIND_SPEED_APPARENT,
     WIND_SPEED_TRUE,
 )
@@ -147,12 +154,19 @@ class SelfStateStore:
         _record(ATTITUDE_YAW, "yaw")
         _record(RATE_OF_TURN, "rate_of_turn")
         _record(SPEED_OVER_GROUND, "sog")
+        _record(SPEED_THROUGH_WATER, "stw")
         _record(COURSE_OVER_GROUND_TRUE, "cog")
         _record(HEADING_TRUE, "heading")
         _record(WIND_SPEED_TRUE, "wind_speed_true")
         _record(WIND_ANGLE_TRUE_WATER, "wind_angle_true")
+        _record(WIND_DIRECTION_TRUE, "wind_direction_true")
         _record(WIND_SPEED_APPARENT, "wind_speed_apparent")
         _record(WIND_ANGLE_APPARENT, "wind_angle_apparent")
+        _record(CURRENT_DRIFT, "current_drift")
+        _record(CURRENT_SET_TRUE, "current_set")
+        _record(RUDDER_ANGLE, "rudder_angle")
+        _record(AUTOPILOT_STATE, "autopilot_state")
+        _record(DEPTH_BELOW_TRANSDUCER, "depth")
         _record(POSITION, "position")
 
         # Unpack position dict
@@ -175,10 +189,17 @@ class SelfStateStore:
             sog=self._val(SPEED_OVER_GROUND),
             cog=self._val(COURSE_OVER_GROUND_TRUE),
             heading=self._val(HEADING_TRUE),
+            stw=self._val(SPEED_THROUGH_WATER),
             wind_speed_true=self._val(WIND_SPEED_TRUE),
             wind_angle_true=self._val(WIND_ANGLE_TRUE_WATER),
+            wind_direction_true=self._val(WIND_DIRECTION_TRUE),
             wind_speed_apparent=self._val(WIND_SPEED_APPARENT),
             wind_angle_apparent=self._val(WIND_ANGLE_APPARENT),
+            current_drift=self._val(CURRENT_DRIFT),
+            current_set=self._val(CURRENT_SET_TRUE),
+            rudder_angle=self._val(RUDDER_ANGLE),
+            autopilot_state=self._val(AUTOPILOT_STATE),
+            depth=self._val(DEPTH_BELOW_TRANSDUCER),
             latitude=lat,
             longitude=lon,
             field_ages=field_ages,

@@ -100,6 +100,21 @@ class Config:
     severity_smoothing_alpha: float = 0.1
 
     # ------------------------------------------------------------------ #
+    # Doppler correction                                                   #
+    # ------------------------------------------------------------------ #
+    # Rudder angle std threshold (rad) – above this the boat is manoeuvring
+    # and Doppler correction is unreliable
+    doppler_rudder_std_max: float = 0.10   # ~5.7 deg
+
+    # Minimum depth (m) for deep-water assumption.  Deep-water requires
+    # depth > wavelength/2.  This is a conservative floor: if mean depth is
+    # below this, we flag Doppler results but still compute them.
+    doppler_shallow_depth_m: float = 10.0
+
+    # Minimum STW (m/s) required to attempt Doppler correction
+    doppler_min_stw: float = 0.5  # ~1 knot
+
+    # ------------------------------------------------------------------ #
     # Derivative computation                                               #
     # ------------------------------------------------------------------ #
     # Trailing moving-average window applied to raw finite-difference

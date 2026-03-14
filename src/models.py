@@ -74,11 +74,26 @@ class InstantSample:
     cog: Optional[float] = None      # rad
     heading: Optional[float] = None  # rad
 
+    # Speed through water
+    stw: Optional[float] = None          # m/s (paddle wheel / log)
+
     # Wind
-    wind_speed_true: Optional[float] = None    # m/s
-    wind_angle_true: Optional[float] = None    # rad, relative to bow
+    wind_speed_true: Optional[float] = None      # m/s
+    wind_angle_true: Optional[float] = None      # rad, relative to bow
+    wind_direction_true: Optional[float] = None  # rad, relative to true north
     wind_speed_apparent: Optional[float] = None  # m/s
     wind_angle_apparent: Optional[float] = None  # rad, relative to bow
+
+    # Current
+    current_drift: Optional[float] = None  # m/s
+    current_set: Optional[float] = None    # rad (direction current flows toward)
+
+    # Steering
+    rudder_angle: Optional[float] = None   # rad
+    autopilot_state: Optional[str] = None  # wind / route / standby
+
+    # Depth
+    depth: Optional[float] = None          # metres below transducer
 
     # Rate of turn
     rate_of_turn: Optional[float] = None  # rad/s
@@ -173,6 +188,17 @@ class WindowFeatures:
     roll_period_stability: Optional[float] = None
     pitch_period_stability: Optional[float] = None
 
+    # STW statistics (for Doppler correction quality)
+    stw_mean: Optional[float] = None
+    stw_std: Optional[float] = None
+
+    # Rudder angle statistics (for manoeuvre detection)
+    rudder_angle_mean: Optional[float] = None
+    rudder_angle_std: Optional[float] = None
+
+    # Depth statistics (for deep-water validation)
+    depth_mean: Optional[float] = None
+
 
 @dataclass
 class MotionEstimate:
@@ -199,6 +225,14 @@ class MotionEstimate:
     dominant_pitch_period: Optional[float] = None
     encounter_period_estimate: Optional[float] = None
     period_confidence: Optional[float] = None
+
+    # Doppler-corrected true wave estimates
+    true_wave_period: Optional[float] = None       # seconds (source wave period)
+    true_wavelength: Optional[float] = None        # metres
+    wave_speed: Optional[float] = None             # m/s (phase velocity)
+    doppler_delta_v: Optional[float] = None        # m/s (STW * cos(TWA))
+    doppler_correction_valid: Optional[bool] = None  # whether correction was feasible
+    wave_heading: Optional[str] = None             # head / following / beam / quartering
 
     # Encounter direction proxy
     # beam_like / head_or_following_like / quartering_like / confused_like

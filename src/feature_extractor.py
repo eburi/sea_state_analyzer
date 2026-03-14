@@ -139,6 +139,176 @@ def _moving_average(buf: Deque[float]) -> float:
 
 
 # --------------------------------------------------------------------------- #
+# Doppler correction: encounter frequency → true wave frequency               #
+# --------------------------------------------------------------------------- #
+# Reference: bareboat-necessities wave estimation math
+# https://bareboat-necessities.github.io/my-bareboat/bareboat-math.html
+#
+# The boat moves through waves at speed STW.  The component of boat velocity
+# along the wave propagation direction is:
+#     delta_v = STW * cos(angle_between_heading_and_waves)
+#
+# For head seas delta_v > 0 (encounter freq > true freq);
+# for following seas delta_v < 0 (encounter freq < true freq).
+#
+# The encounter frequency f_e relates to the true frequency f via the
+# deep-water dispersion relation  ω² = g·k  and the Doppler shift:
+#     ω_e = ω - k · delta_v          (ω = 2π·f, k = ω²/g)
+#
+# Solving for ω (true angular frequency) given ω_e and delta_v:
+#     ω² · (delta_v / g) - ω + ω_e = 0
+#
+# This is a quadratic in ω.  For delta_v ≠ 0:
+#     ω = [1 ± sqrt(1 - 4·(delta_v/g)·ω_e)] / [2·delta_v/g]
+#
+# We pick the physically meaningful root (positive ω, and the one closest
+# to ω_e when delta_v is small).
+#
+# From true ω:
+#     T_true = 2π / ω
+#     L      = g·T² / (2π)          deep-water wavelength
+#     c      = L / T = g·T / (2π)   phase velocity
+# --------------------------------------------------------------------------- #
+
+_GRAVITY = 9.80665  # m/s²
+
+
+def doppler_correct(
+    encounter_freq_hz: float,
+    delta_v: float,
+) -> Optional[Tuple[float, float, float]]:
+    """
+    Convert encounter frequency to true wave frequency via Doppler correction.
+
+    Parameters
+    ----------
+    encounter_freq_hz : float
+        Observed (encounter) frequency in Hz.
+    delta_v : float
+        Component of boat speed along wave direction (m/s).
+        Positive for head seas, negative for following seas.
+
+    Returns
+    -------
+    (true_period_s, wavelength_m, phase_speed_m_s) or None if correction
+    is infeasible (discriminant < 0 or result is non-physical).
+    """
+    if encounter_freq_hz <= 0:
+        return None
+
+    omega_e = 2.0 * math.pi * encounter_freq_hz
+    g = _GRAVITY
+
+    # When delta_v ≈ 0 there is no Doppler shift
+    if abs(delta_v) < 0.05:
+        T = 1.0 / encounter_freq_hz
+        L = g * T * T / (2.0 * math.pi)
+        c = g * T / (2.0 * math.pi)
+        return T, L, c
+
+    # Quadratic: (delta_v/g)·ω² - ω + ω_e = 0
+    a_coeff = delta_v / g
+    # b = -1, c = omega_e
+    discriminant = 1.0 - 4.0 * a_coeff * omega_e
+
+    if discriminant < 0:
+        # No real solution — correction infeasible (very strong following
+        # sea or encounter freq too high for the speed)
+        return None
+
+    sqrt_disc = math.sqrt(discriminant)
+
+    # Two roots
+    omega_1 = (1.0 + sqrt_disc) / (2.0 * a_coeff)
+    omega_2 = (1.0 - sqrt_disc) / (2.0 * a_coeff)
+
+    # Pick the positive root that is physically meaningful
+    candidates = []
+    for omega in (omega_1, omega_2):
+        if omega > 0:
+            candidates.append(omega)
+
+    if not candidates:
+        return None
+
+    # Prefer the root closest to omega_e (smallest Doppler shift)
+    omega_true = min(candidates, key=lambda w: abs(w - omega_e))
+
+    T = 2.0 * math.pi / omega_true
+    L = g * T * T / (2.0 * math.pi)
+    c = g * T / (2.0 * math.pi)
+
+    # Sanity: reject non-physical results
+    # True period should be positive and within ocean-wave range (1–30 s)
+    if T < 1.0 or T > 30.0:
+        return None
+
+    return T, L, c
+
+
+def compute_delta_v(
+    stw: Optional[float],
+    wind_angle_true: Optional[float],
+) -> Optional[float]:
+    """
+    Estimate the component of boat speed along the wave propagation direction.
+
+    Uses true wind angle as the best available proxy for wave direction
+    (waves generally travel with the wind in wind-sea conditions).
+
+    Parameters
+    ----------
+    stw : float or None
+        Speed through water (m/s).
+    wind_angle_true : float or None
+        True wind angle relative to bow (rad). 0 = head wind, π = following.
+
+    Returns
+    -------
+    delta_v in m/s or None if insufficient data.
+    Positive = head seas (boat moves toward waves).
+    Negative = following seas (boat moves with waves).
+    """
+    if stw is None or stw < 0.1:
+        return None
+
+    # Best case: we have true wind angle relative to bow
+    if wind_angle_true is not None:
+        # Wind angle 0 = wind from ahead → waves from ahead → head seas → delta_v > 0
+        # Wind angle π = wind from astern → waves from astern → following → delta_v < 0
+        # Waves travel in the same direction as wind, so the boat's velocity
+        # component along the wave travel direction is STW * cos(wind_angle).
+        # For wind_angle=0 (headwind): cos(0)=1, boat moves into waves → positive.
+        return float(stw * math.cos(wind_angle_true))
+
+    return None
+
+
+def classify_wave_heading(delta_v: Optional[float], stw: Optional[float]) -> Optional[str]:
+    """
+    Classify wave approach direction based on delta_v / STW ratio.
+
+    Returns one of: head, following, beam, quartering_head, quartering_following,
+    or None.
+    """
+    if delta_v is None or stw is None or stw < 0.1:
+        return None
+
+    ratio = delta_v / stw  # cos(angle between heading and wave direction)
+
+    if ratio > 0.7:
+        return "head"
+    elif ratio > 0.3:
+        return "quartering_head"
+    elif ratio > -0.3:
+        return "beam"
+    elif ratio > -0.7:
+        return "quartering_following"
+    else:
+        return "following"
+
+
+# --------------------------------------------------------------------------- #
 # Feature extractor                                                            #
 # --------------------------------------------------------------------------- #
 
@@ -403,6 +573,23 @@ class FeatureExtractor:
         if len(wat) >= 2:
             wf.wind_angle_var = float(np.var(wat))
 
+        # ---- STW statistics (for Doppler correction quality) ---- #
+        stw_arr = _arr("stw")
+        if len(stw_arr) >= 2:
+            wf.stw_mean = float(np.mean(stw_arr))
+            wf.stw_std = float(np.std(stw_arr))
+
+        # ---- rudder angle statistics (for manoeuvre detection) ---- #
+        rudder = _arr("rudder_angle")
+        if len(rudder) >= 2:
+            wf.rudder_angle_mean = float(np.mean(rudder))
+            wf.rudder_angle_std = float(np.std(rudder))
+
+        # ---- depth statistics (for deep-water validation) ---- #
+        depth = _arr("depth")
+        if len(depth) >= 1:
+            wf.depth_mean = float(np.mean(depth))
+
         return wf
 
     # ------------------------------------------------------------------ #
@@ -467,6 +654,9 @@ class FeatureExtractor:
         me.direction_confidence = dir_conf
         me.roll_dominant = roll_dom
 
+        # ---- Doppler correction: encounter period → true wave period ---- #
+        self._apply_doppler_correction(me, wf)
+
         # ---- regularity / confusion ---- #
         me.confusion_index, me.motion_regularity = _estimate_regularity(wf)
 
@@ -484,6 +674,93 @@ class FeatureExtractor:
     # ------------------------------------------------------------------ #
     # Internal helpers                                                      #
     # ------------------------------------------------------------------ #
+
+    def _apply_doppler_correction(
+        self, me: MotionEstimate, wf: WindowFeatures
+    ) -> None:
+        """
+        Attempt Doppler correction on the encounter period estimate.
+
+        Populates me.true_wave_period, me.true_wavelength, me.wave_speed,
+        me.doppler_delta_v, me.doppler_correction_valid, and me.wave_heading.
+
+        Requires: encounter_period_estimate, STW, and wind angle data in the
+        rolling window.
+
+        Validation guards:
+        - Suppressed during manoeuvres (rudder_angle_std > threshold).
+        - Flagged (but still computed) in shallow water where deep-water
+          dispersion may not hold.
+        """
+        cfg = self._config
+        me.doppler_correction_valid = False
+
+        encounter_period = me.encounter_period_estimate
+        if encounter_period is None or encounter_period <= 0:
+            return
+
+        encounter_freq = 1.0 / encounter_period
+
+        # --- Guard: manoeuvre detection via rudder angle --- #
+        if (wf.rudder_angle_std is not None
+                and wf.rudder_angle_std > cfg.doppler_rudder_std_max):
+            logger.debug(
+                "Doppler correction suppressed: rudder_angle_std=%.3f > %.3f",
+                wf.rudder_angle_std, cfg.doppler_rudder_std_max,
+            )
+            return
+
+        # --- Guard: minimum STW --- #
+        if wf.stw_mean is not None and wf.stw_mean < cfg.doppler_min_stw:
+            return
+
+        # Compute mean delta_v from samples in the buffer
+        buf = self._buffers.get(int(me.window_s))
+        if buf is None or len(buf) < 4:
+            return
+
+        delta_vs: List[float] = []
+        for s in buf:
+            dv = compute_delta_v(s.stw, s.wind_angle_true)
+            if dv is not None:
+                delta_vs.append(dv)
+
+        if len(delta_vs) < max(4, len(buf) // 4):
+            # Not enough STW / wind data in the window
+            return
+
+        mean_delta_v = float(np.mean(delta_vs))
+        me.doppler_delta_v = mean_delta_v
+
+        # Classify wave heading from delta_v
+        mean_stw = wf.stw_mean
+        me.wave_heading = classify_wave_heading(mean_delta_v, mean_stw)
+
+        # Apply Doppler correction
+        result = doppler_correct(encounter_freq, mean_delta_v)
+        if result is None:
+            return
+
+        true_period, wavelength, phase_speed = result
+        me.true_wave_period = true_period
+        me.true_wavelength = wavelength
+        me.wave_speed = phase_speed
+
+        # --- Shallow-water flag --- #
+        # Deep-water assumption requires depth > wavelength / 2.
+        # If depth data is available and too shallow, flag the result as
+        # unreliable but still provide it.
+        if wf.depth_mean is not None and wf.depth_mean > 0:
+            if wf.depth_mean < wavelength / 2.0:
+                logger.debug(
+                    "Doppler correction in shallow water: depth=%.1f m < L/2=%.1f m",
+                    wf.depth_mean, wavelength / 2.0,
+                )
+                # Still provide the estimate but mark it as not fully valid
+                me.doppler_correction_valid = False
+                return
+
+        me.doppler_correction_valid = True
 
     def _compute_severity(self, wf: WindowFeatures) -> float:
         cfg = self._config
