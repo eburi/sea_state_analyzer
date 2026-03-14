@@ -206,10 +206,11 @@ def doppler_correct(
         c = g * T / (2.0 * math.pi)
         return T, L, c
 
-    # Quadratic: (delta_v/g)·ω² - ω + ω_e = 0
+    # Forward Doppler: ω_e = ω + (ω²/g)·Δv   (head seas Δv > 0 → ω_e > ω)
+    # Rearranged:      (Δv/g)·ω² + ω - ω_e = 0
     a_coeff = delta_v / g
-    # b = -1, c = omega_e
-    discriminant = 1.0 - 4.0 * a_coeff * omega_e
+    # a = Δv/g, b = 1, c = -ω_e
+    discriminant = 1.0 + 4.0 * a_coeff * omega_e
 
     if discriminant < 0:
         # No real solution — correction infeasible (very strong following
@@ -218,9 +219,9 @@ def doppler_correct(
 
     sqrt_disc = math.sqrt(discriminant)
 
-    # Two roots
-    omega_1 = (1.0 + sqrt_disc) / (2.0 * a_coeff)
-    omega_2 = (1.0 - sqrt_disc) / (2.0 * a_coeff)
+    # Two roots: ω = (-1 ± √disc) / (2·Δv/g)
+    omega_1 = (-1.0 + sqrt_disc) / (2.0 * a_coeff)
+    omega_2 = (-1.0 - sqrt_disc) / (2.0 * a_coeff)
 
     # Pick the positive root that is physically meaningful
     candidates = []
