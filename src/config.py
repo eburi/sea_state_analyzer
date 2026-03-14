@@ -160,6 +160,97 @@ class Config:
         p.mkdir(parents=True, exist_ok=True)
         return p
 
+    @classmethod
+    def from_env(cls) -> "Config":
+        """Create a Config with overrides from BOAT_STATE_* environment variables.
+
+        Used by the HA App entry point (run.sh) to pass options.json values
+        into the Python process.  Any env var that is not set falls back to
+        the dataclass default.
+        """
+        import os
+
+        def _env(key: str) -> str | None:
+            return os.environ.get(f"BOAT_STATE_{key}")
+
+        def _env_bool(key: str) -> bool | None:
+            v = _env(key)
+            if v is None:
+                return None
+            return v.lower() in ("true", "1", "yes")
+
+        def _env_float(key: str) -> float | None:
+            v = _env(key)
+            if v is None:
+                return None
+            try:
+                return float(v)
+            except ValueError:
+                return None
+
+        def _env_int(key: str) -> int | None:
+            v = _env(key)
+            if v is None:
+                return None
+            try:
+                return int(v)
+            except ValueError:
+                return None
+
+        kwargs: dict = {}
+
+        url = _env("SIGNALK_URL")
+        if url:
+            kwargs["base_url"] = url
+            kwargs["ws_url"] = (
+                url.replace("http://", "ws://").replace("https://", "wss://")
+                + "/signalk/v1/stream?subscribe=none"
+            )
+
+        sr = _env_float("SAMPLE_RATE_HZ")
+        if sr is not None:
+            kwargs["sample_rate_hz"] = sr
+
+        ie = _env_bool("IMU_ENABLED")
+        if ie is not None:
+            kwargs["imu_enabled"] = ie
+
+        ib = _env_int("IMU_BUS_NUMBER")
+        if ib is not None:
+            kwargs["imu_bus_number"] = ib
+
+        ia = _env_int("IMU_ADDRESS")
+        if ia is not None:
+            kwargs["imu_address"] = ia
+
+        isr = _env_float("IMU_SAMPLE_RATE_HZ")
+        if isr is not None:
+            kwargs["imu_sample_rate_hz"] = isr
+
+        im = _env_bool("IMU_INCLUDE_MAG")
+        if im is not None:
+            kwargs["imu_include_mag"] = im
+
+        ep = _env_bool("ENABLE_PLOTS")
+        if ep is not None:
+            kwargs["enable_live_plots"] = ep
+
+        ll = _env("LOG_LEVEL")
+        if ll is not None:
+            level_map = {
+                "debug": logging.DEBUG,
+                "info": logging.INFO,
+                "warning": logging.WARNING,
+                "error": logging.ERROR,
+            }
+            kwargs["log_level"] = level_map.get(ll.lower(), logging.INFO)
+
+        od = _env("OUTPUT_DIR")
+        if od:
+            kwargs["output_base_dir"] = Path(od)
+
+        return cls(**kwargs)
+
 
 # Module-level default used throughout the project
 DEFAULT_CONFIG = Config()

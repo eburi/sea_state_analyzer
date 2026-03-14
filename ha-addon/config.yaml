@@ -1,0 +1,41 @@
+name: Boat State
+version: "0.1.0"
+slug: boat_state
+description: >-
+  Sea-state motion estimation from Signal K vessel data and onboard IMU.
+  Connects to a Signal K server via WebSocket, ingests attitude/movement/wind
+  data, reads ICM-20948 accelerometer via I2C, and produces wave-motion
+  proxies (severity, regime, encounter period, Doppler-corrected true wave
+  period).
+url: "https://github.com/erichburi/boat_state"
+arch:
+  - aarch64
+init: false
+startup: services
+# I2C device access for IMU
+devices:
+  - /dev/i2c-1
+# Persistent output storage mapped to /data inside the container
+map:
+  - share:rw
+# User-configurable options (available in /data/options.json)
+options:
+  signalk_url: "http://primrose.local:3000"
+  sample_rate_hz: 2.0
+  imu_enabled: true
+  imu_bus_number: 1
+  imu_address: 104
+  imu_sample_rate_hz: 50.0
+  imu_include_mag: true
+  enable_plots: false
+  log_level: "info"
+schema:
+  signalk_url: url
+  sample_rate_hz: "float(0.5,10)"
+  imu_enabled: bool
+  imu_bus_number: "int(0,20)"
+  imu_address: "int(0,127)"
+  imu_sample_rate_hz: "float(1,200)"
+  imu_include_mag: bool
+  enable_plots: bool
+  log_level: list(debug|info|warning|error)

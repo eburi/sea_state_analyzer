@@ -643,7 +643,8 @@ def main() -> None:
     parser = _build_parser()
     args, _ = parser.parse_known_args()
 
-    config = Config()
+    # Start with env-var overrides (for HA App), then apply CLI args on top
+    config = Config.from_env()
     _setup_logging(config.log_level)
 
     mode = args.mode or "live"
