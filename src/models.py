@@ -95,6 +95,24 @@ class InstantSample:
     # Depth
     depth: Optional[float] = None          # metres below transducer
 
+    # IMU accelerometer (m/s²) — raw, in sensor frame
+    accel_x: Optional[float] = None
+    accel_y: Optional[float] = None
+    accel_z: Optional[float] = None
+
+    # IMU gyroscope (rad/s) — raw, in sensor frame
+    gyro_x: Optional[float] = None
+    gyro_y: Optional[float] = None
+    gyro_z: Optional[float] = None
+
+    # IMU magnetometer (µT)
+    mag_x: Optional[float] = None
+    mag_y: Optional[float] = None
+    mag_z: Optional[float] = None
+
+    # Vertical acceleration (m/s², z minus gravity)
+    vertical_accel: Optional[float] = None
+
     # Rate of turn
     rate_of_turn: Optional[float] = None  # rad/s
 

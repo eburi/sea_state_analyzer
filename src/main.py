@@ -45,6 +45,22 @@ from state_store import SelfStateStore
 
 logger = logging.getLogger(__name__)
 
+# Try importing IMU reader — absent on Mac / without smbus2
+try:
+    from imu_reader import IMUReader, IMUSample
+    _IMU_AVAILABLE = True
+except ImportError:
+    _IMU_AVAILABLE = False
+
+    class _IMUReaderStub:  # type: ignore[no-redef]
+        """Placeholder so attribute access doesn't crash at type-check time."""
+        @staticmethod
+        async def create(**kwargs: object) -> None:
+            return None
+
+    IMUReader = _IMUReaderStub  # type: ignore[misc,assignment]
+    IMUSample = None  # type: ignore[misc,assignment]
+
 
 # --------------------------------------------------------------------------- #
 # Shared pipeline helpers                                                      #
@@ -71,6 +87,10 @@ async def _live_mode(config: Config) -> None:
     """
     Connect to Signal K, ingest vessel self data, extract features,
     record outputs, and print console summaries.
+
+    When IMU hardware is available, reads accelerometer/gyroscope at
+    imu_sample_rate_hz and merges the latest reading into each
+    InstantSample.
     """
     output_dir = config.dated_output_dir()
     logger.info("Output directory: %s", output_dir)
@@ -86,6 +106,30 @@ async def _live_mode(config: Config) -> None:
 
     # Check server availability (non-blocking; failure does not abort)
     await client.check_availability()
+
+    # --- IMU setup (best-effort) ----------------------------------------- #
+    imu_reader: Optional["IMUReader"] = None  # type: ignore[name-defined]
+    # Latest IMU reading, shared between _imu_loop and _sample_loop.
+    # Written by _imu_loop at imu_sample_rate_hz, read by _sample_loop at
+    # sample_rate_hz.  No lock needed: single writer, single reader, and a
+    # stale-by-one-sample race is harmless.
+    latest_imu_sample: Optional["IMUSample"] = None  # type: ignore[name-defined]
+
+    if config.imu_enabled and _IMU_AVAILABLE:
+        logger.info("Attempting IMU init on i2c bus %d addr 0x%02X…",
+                     config.imu_bus_number, config.imu_address)
+        imu_reader = await IMUReader.create(
+            bus_number=config.imu_bus_number,
+            address=config.imu_address,
+        )
+        if imu_reader is not None:
+            logger.info("IMU reader active – sampling at %.0f Hz", config.imu_sample_rate_hz)
+        else:
+            logger.info("IMU not available – continuing without accelerometer data")
+    elif not _IMU_AVAILABLE:
+        logger.info("smbus2 not installed – IMU support disabled")
+    else:
+        logger.info("IMU disabled in config")
 
     delta_queue: asyncio.Queue[SignalKValueUpdate] = asyncio.Queue(
         maxsize=config.delta_queue_maxsize
@@ -108,6 +152,50 @@ async def _live_mode(config: Config) -> None:
             await store.apply_update(update)
             delta_queue.task_done()
 
+    async def _imu_loop() -> None:
+        """Poll IMU at imu_sample_rate_hz, store latest reading.
+
+        Runs only when imu_reader is not None.  Errors are logged but
+        never crash the loop — a single bad read is skipped.
+        """
+        nonlocal latest_imu_sample
+        assert imu_reader is not None
+        interval = 1.0 / config.imu_sample_rate_hz
+        consecutive_errors = 0
+        while True:
+            try:
+                if config.imu_include_mag:
+                    latest_imu_sample = await imu_reader.read_sample()
+                else:
+                    latest_imu_sample = await imu_reader.read_accel_gyro_only()
+                consecutive_errors = 0
+            except Exception as exc:
+                consecutive_errors += 1
+                if consecutive_errors <= 3 or consecutive_errors % 100 == 0:
+                    logger.warning("IMU read error (#%d): %s", consecutive_errors, exc)
+            await asyncio.sleep(interval)
+
+    def _merge_imu(sample: InstantSample) -> InstantSample:
+        """Overlay latest IMU data onto an InstantSample (in-place mutation)."""
+        imu = latest_imu_sample
+        if imu is None:
+            return sample
+        sample.accel_x = imu.accel_x
+        sample.accel_y = imu.accel_y
+        sample.accel_z = imu.accel_z
+        sample.gyro_x = imu.gyro_x
+        sample.gyro_y = imu.gyro_y
+        sample.gyro_z = imu.gyro_z
+        sample.mag_x = imu.mag_x
+        sample.mag_y = imu.mag_y
+        sample.mag_z = imu.mag_z
+        sample.vertical_accel = imu.vertical_accel
+        # Track IMU freshness
+        imu_age = (sample.timestamp - imu.timestamp).total_seconds()
+        sample.field_ages["imu"] = imu_age
+        sample.field_valid["imu"] = imu_age < config.stale_threshold_s
+        return sample
+
     async def _sample_loop() -> None:
         """Produce InstantSamples at the configured rate."""
         nonlocal samples_produced, last_sample, last_me, last_wf_short
@@ -115,6 +203,10 @@ async def _live_mode(config: Config) -> None:
         while True:
             await asyncio.sleep(interval)
             sample = store.snapshot()
+
+            # Merge latest IMU reading (if available)
+            _merge_imu(sample)
+
             last_sample = sample
             samples_produced += 1
 
@@ -194,6 +286,8 @@ async def _live_mode(config: Config) -> None:
         asyncio.create_task(_plot_loop(), name="plotter"),
         asyncio.create_task(_flush_loop(), name="flusher"),
     ]
+    if imu_reader is not None:
+        tasks.append(asyncio.create_task(_imu_loop(), name="imu"))
 
     try:
         await asyncio.gather(*tasks)
@@ -202,6 +296,8 @@ async def _live_mode(config: Config) -> None:
     finally:
         for t in tasks:
             t.cancel()
+        if imu_reader is not None:
+            imu_reader.close()
         recorder.close()
         if config.enable_live_plots:
             file_plotter.plot_all(

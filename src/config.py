@@ -115,6 +115,15 @@ class Config:
     doppler_min_stw: float = 0.5  # ~1 knot
 
     # ------------------------------------------------------------------ #
+    # IMU (ICM-20948)                                                      #
+    # ------------------------------------------------------------------ #
+    imu_enabled: bool = True          # attempt IMU init; False disables
+    imu_bus_number: int = 1           # i2c bus (RPi default = 1)
+    imu_address: int = 0x68           # ICM-20948 default address
+    imu_sample_rate_hz: float = 50.0  # target IMU poll rate
+    imu_include_mag: bool = True      # include magnetometer (slower)
+
+    # ------------------------------------------------------------------ #
     # Derivative computation                                               #
     # ------------------------------------------------------------------ #
     # Trailing moving-average window applied to raw finite-difference
