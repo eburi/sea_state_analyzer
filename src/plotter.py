@@ -34,6 +34,10 @@ def _rad_to_deg(v: Optional[float]) -> Optional[float]:
     return math.degrees(v) if v is not None else None
 
 
+def _ms_to_knots(v: Optional[float]) -> Optional[float]:
+    return v * 1.94384 if v is not None else None
+
+
 def _fmt(v: Optional[float], fmt: str = ".2f", unit: str = "") -> str:
     if v is None:
         return "  --  "
@@ -96,14 +100,14 @@ class TerminalPlotter:
                 f"sog={_fmt(sample.sog, '.2f', 'm/s'):>10}",
             ]
             if sample.wind_speed_true is not None:
-                tws = sample.wind_speed_true
+                tws_kn = _ms_to_knots(sample.wind_speed_true)
                 twa_deg = _rad_to_deg(sample.wind_angle_true)
-                aws = sample.wind_speed_apparent
+                aws_kn = _ms_to_knots(sample.wind_speed_apparent)
                 awa_deg = _rad_to_deg(sample.wind_angle_apparent)
                 lines.append(
-                    f"║  WIND TRUE   {_fmt(tws, '.1f', 'm/s'):>10}  "
+                    f"║  WIND TRUE   {_fmt(tws_kn, '.1f', 'kn'):>10}  "
                     f"angle={_fmt(twa_deg, '.0f', '°'):>7}"
-                    f"   APP {_fmt(aws, '.1f', 'm/s'):>7}  "
+                    f"   APP {_fmt(aws_kn, '.1f', 'kn'):>7}  "
                     f"angle={_fmt(awa_deg, '.0f', '°'):>7}"
                 )
         else:
