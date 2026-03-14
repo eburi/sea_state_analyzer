@@ -222,9 +222,27 @@ pytest tests/ -v
 
 ---
 
+## Deployment goal
+
+The long-term target is a **Home Assistant Add-on** (formerly called "Addon") that runs alongside the Signal K Add-on on the same host and continuously analyses wave state in the background. The two add-ons communicate over the local network — boat_state connects to Signal K's WebSocket API just as it does today.
+
+A **Signal K plugin** is a possible alternative packaging, but the project is designed to stay independent of Signal K internals so it can outlive any future migration away from Signal K. Converting to a Signal K plugin later would be straightforward since the only integration point is the WebSocket delta stream.
+
+Design decisions that support this:
+
+- The only external dependency is Signal K's WebSocket delta API — no Signal K library imports, no plugin SDK.
+- All configuration lives in `config.py` and can be mapped to Home Assistant Add-on options (`options.json` / UI schema) without code changes.
+- The process is a single long-running async Python application, which fits the Home Assistant Add-on model (one container, one process).
+- Output files are written to a configurable directory that can be mapped to a Home Assistant `/share` or `/data` volume.
+- No macOS-specific code; runs on Raspberry Pi 5 / Linux as-is.
+
+---
+
 ## Future development
 
 1. **Clustering (Stage 2):** Use `features_60s.parquet` with KMeans / Gaussian Mixture / HDBSCAN to discover natural motion regimes.
 2. **Label collection (Stage 3):** Apply manual labels (calm / moderate / rough / surfing / confused) to regime clusters.
 3. **Supervised models:** Train random forest or gradient boosting on the labelled feature matrix.
 4. **Raspberry Pi 5 deployment:** The pipeline is async and has no macOS dependencies; deploy with the same `requirements.txt` on Pi OS.
+5. **Home Assistant Add-on packaging:** Dockerfile, `config.yaml`, and `options.json` for the HA Add-on store. Expose motion severity and regime as HA sensors via the Supervisor API or MQTT.
+6. **Signal K plugin (optional):** Wrap the core in a Signal K server plugin if tight integration is preferred. This is a packaging change only — the analysis code stays the same.
