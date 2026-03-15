@@ -570,6 +570,11 @@ def estimate_waves_from_accel(
 
     # --- Trochoidal estimate --- #
     troch = trochoidal_wave_height(accel_max, dom_freq, delta_v)
+    if troch is None:
+        logger.info(
+            "trochoidal=None: accel_max=%.4f, dom_freq=%.4f, delta_v=%.2f",
+            accel_max, dom_freq, delta_v,
+        )
     result.trochoidal = troch
 
     # --- Kalman heave --- #

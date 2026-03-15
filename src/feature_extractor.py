@@ -844,15 +844,51 @@ class FeatureExtractor:
         delta_v = me.doppler_delta_v or 0.0
 
         # Run combined wave estimation
+        # NOTE: Do NOT pass the Kalman estimator here — it is already being
+        # updated in real-time via add_imu_accel().  We just query its state.
         wave_est = estimate_waves_from_accel(
             vertical_accel=accel_data,
             fs=self._accel_fs,
             delta_v=delta_v,
-            kalman_estimator=self._kalman_heave,
+            kalman_estimator=None,  # Kalman fed separately at IMU rate
             lowpass_cutoff_mult=self._config.heave_lowpass_cutoff_mult,
             psd_min_samples=min_samples,
         )
+
+        # Overlay Kalman heave results if the filter has converged
+        if self._kalman_heave is not None:
+            kalman_est = self._kalman_heave.get_estimate(min_samples=min_samples)
+            if kalman_est is not None:
+                wave_est.kalman = kalman_est
+                wave_est.heave = kalman_est.heave_displacement
+                # If trochoidal also produced a result, compare
+                if wave_est.trochoidal is not None and kalman_est.converged:
+                    hs_k = kalman_est.significant_height
+                    hs_t = wave_est.trochoidal.significant_height
+                    ratio = hs_k / (hs_t + 1e-6)
+                    if 0.3 < ratio < 3.0:
+                        # Agreement → use Kalman
+                        wave_est.significant_height = hs_k
+                        wave_est.method_used = "kalman"
+                    # Otherwise keep trochoidal (already set)
+                elif kalman_est.converged and wave_est.significant_height is None:
+                    # Only Kalman available
+                    wave_est.significant_height = kalman_est.significant_height
+                    wave_est.method_used = "kalman"
         self._latest_wave_estimate = wave_est
+
+        # Log wave estimation result
+        logger.info(
+            "wave_est: samples=%d, accel_rms=%.4f, freq=%.3f, "
+            "troch=%s, kalman=%s, Hs=%s, method=%s",
+            len(accel_data),
+            wave_est.accel_rms or 0.0,
+            wave_est.accel_dominant_freq or 0.0,
+            f"{wave_est.trochoidal.significant_height:.3f}" if wave_est.trochoidal else "None",
+            f"{wave_est.kalman.significant_height:.3f}" if wave_est.kalman else "None",
+            f"{wave_est.significant_height:.3f}" if wave_est.significant_height is not None else "None",
+            wave_est.method_used,
+        )
 
         # Populate MotionEstimate fields
         if wave_est.significant_height is not None:

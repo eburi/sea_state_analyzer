@@ -233,6 +233,21 @@ class TestIMUSample:
         )
         assert abs(sample.vertical_accel - heave) < 0.01
 
+    def test_vertical_accel_tilted_at_rest(self) -> None:
+        """At rest but tilted 90°, vertical_accel should still be ~0."""
+        # IMU mounted sideways: gravity along x-axis, z reads ~0
+        sample = IMUSample(
+            timestamp=datetime.now(timezone.utc),
+            accel_x=_GRAVITY,
+            accel_y=0.0,
+            accel_z=0.0,
+            gyro_x=0.0,
+            gyro_y=0.0,
+            gyro_z=0.0,
+        )
+        # |a| - g = g - g = 0 regardless of orientation
+        assert abs(sample.vertical_accel) < 0.01
+
     def test_mag_fields_optional(self) -> None:
         """Magnetometer fields default to None."""
         sample = IMUSample(

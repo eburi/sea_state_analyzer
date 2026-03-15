@@ -121,7 +121,7 @@ def _window_features_to_row(wf: WindowFeatures) -> Dict[str, Any]:
 
 
 def _motion_estimate_to_event(me: MotionEstimate) -> Dict[str, Any]:
-    return {
+    d: Dict[str, Any] = {
         "timestamp": _ts_str(me.timestamp),
         "timestamp_epoch": _ts_epoch(me.timestamp),
         "window_s": me.window_s,
@@ -138,9 +138,18 @@ def _motion_estimate_to_event(me: MotionEstimate) -> Dict[str, Any]:
         "motion_regularity": me.motion_regularity,
         "confusion_index": me.confusion_index,
         "comfort_proxy": me.comfort_proxy,
+        "significant_height": me.significant_height,
+        "heave": me.heave,
+        "wave_height_method": me.wave_height_method,
+        "wave_height_confidence": me.wave_height_confidence,
+        "accel_dominant_freq": me.accel_dominant_freq,
+        "accel_dominant_period": me.accel_dominant_period,
+        "accel_freq_confidence": me.accel_freq_confidence,
         "severity_trend": me.severity_trend,
         "overall_confidence": me.overall_confidence,
     }
+    # Strip None values for compact JSONL output
+    return {k: v for k, v in d.items() if v is not None}
 
 
 # --------------------------------------------------------------------------- #

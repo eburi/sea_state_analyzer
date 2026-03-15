@@ -119,8 +119,21 @@ class IMUSample:
 
     @property
     def vertical_accel(self) -> float:
-        """Vertical acceleration component in m/s² (z-axis, subtract gravity)."""
-        return self.accel_z - _GRAVITY
+        """Vertical (heave) acceleration component in m/s².
+
+        Uses ``|a| - g`` (total magnitude minus gravity) which is
+        orientation-independent.  This is always zero at rest regardless
+        of how the IMU is mounted.  Positive = upward acceleration
+        exceeding 1 g, negative = below 1 g (e.g. in free-fall or
+        at the crest of a wave).
+
+        Note: this is a scalar approximation.  For a truly stationary
+        sensor tilted at angle θ, ``|a| = g`` always, so the result
+        is 0 as expected.  In dynamic conditions with lateral
+        acceleration, some cross-axis contamination occurs, but for
+        ocean wave heave estimation this is acceptable.
+        """
+        return self.accel_magnitude - _GRAVITY
 
 
 # --------------------------------------------------------------------------- #
