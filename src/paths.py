@@ -198,6 +198,19 @@ WAVE_ENCOUNTER_DIRECTION = "environment.water.waves.encounterDirection"  # beam/
 WAVE_COMFORT_PROXY = "environment.water.waves.comfortProxy"           # 0–1
 WAVE_PERIOD_CONFIDENCE = "environment.water.waves.periodConfidence"    # 0–1
 
+# Spectral partition paths — wind-wave + two swell components
+# These follow the same naming convention as Open-Meteo / Copernicus
+# forecast partition data for easy comparison.
+WAVE_WIND_WAVE_HEIGHT = "environment.water.waves.windWave.height"          # metres
+WAVE_WIND_WAVE_PERIOD = "environment.water.waves.windWave.period"          # seconds
+WAVE_WIND_WAVE_CONFIDENCE = "environment.water.waves.windWave.confidence"  # 0–1
+WAVE_SWELL_1_HEIGHT = "environment.water.waves.swell1.height"              # metres
+WAVE_SWELL_1_PERIOD = "environment.water.waves.swell1.period"              # seconds
+WAVE_SWELL_1_CONFIDENCE = "environment.water.waves.swell1.confidence"      # 0–1
+WAVE_SWELL_2_HEIGHT = "environment.water.waves.swell2.height"              # metres
+WAVE_SWELL_2_PERIOD = "environment.water.waves.swell2.period"              # seconds
+WAVE_SWELL_2_CONFIDENCE = "environment.water.waves.swell2.confidence"      # 0–1
+
 # All publish paths for iteration
 PUBLISH_PATHS: List[str] = [
     WAVE_SIGNIFICANT_HEIGHT,
@@ -212,6 +225,15 @@ PUBLISH_PATHS: List[str] = [
     WAVE_ENCOUNTER_DIRECTION,
     WAVE_COMFORT_PROXY,
     WAVE_PERIOD_CONFIDENCE,
+    WAVE_WIND_WAVE_HEIGHT,
+    WAVE_WIND_WAVE_PERIOD,
+    WAVE_WIND_WAVE_CONFIDENCE,
+    WAVE_SWELL_1_HEIGHT,
+    WAVE_SWELL_1_PERIOD,
+    WAVE_SWELL_1_CONFIDENCE,
+    WAVE_SWELL_2_HEIGHT,
+    WAVE_SWELL_2_PERIOD,
+    WAVE_SWELL_2_CONFIDENCE,
 ]
 
 # --------------------------------------------------------------------------- #
@@ -300,6 +322,66 @@ WAVE_PATH_META: Dict[str, Dict[str, object]] = {
         "description": "Confidence in dominant period estimate (0 = low, 1 = high)",
         "displayName": "Period Confidence",
         "shortName": "Tconf",
+        "displayScale": {"lower": 0, "upper": 1, "type": "linear"},
+    },
+    # Spectral partitions — wind-wave
+    WAVE_WIND_WAVE_HEIGHT: {
+        "units": "m",
+        "description": "Significant height of wind-wave component (highest-frequency partition)",
+        "displayName": "Wind Wave Height",
+        "shortName": "Hs_ww",
+    },
+    WAVE_WIND_WAVE_PERIOD: {
+        "units": "s",
+        "description": "Peak period of wind-wave component",
+        "displayName": "Wind Wave Period",
+        "shortName": "T_ww",
+    },
+    WAVE_WIND_WAVE_CONFIDENCE: {
+        "units": "ratio",
+        "description": "Confidence in wind-wave partition (energy share × peak sharpness)",
+        "displayName": "Wind Wave Confidence",
+        "shortName": "C_ww",
+        "displayScale": {"lower": 0, "upper": 1, "type": "linear"},
+    },
+    # Spectral partitions — primary swell
+    WAVE_SWELL_1_HEIGHT: {
+        "units": "m",
+        "description": "Significant height of primary swell component",
+        "displayName": "Swell 1 Height",
+        "shortName": "Hs_s1",
+    },
+    WAVE_SWELL_1_PERIOD: {
+        "units": "s",
+        "description": "Peak period of primary swell component",
+        "displayName": "Swell 1 Period",
+        "shortName": "T_s1",
+    },
+    WAVE_SWELL_1_CONFIDENCE: {
+        "units": "ratio",
+        "description": "Confidence in primary swell partition",
+        "displayName": "Swell 1 Confidence",
+        "shortName": "C_s1",
+        "displayScale": {"lower": 0, "upper": 1, "type": "linear"},
+    },
+    # Spectral partitions — secondary swell
+    WAVE_SWELL_2_HEIGHT: {
+        "units": "m",
+        "description": "Significant height of secondary swell component (lowest-frequency partition)",
+        "displayName": "Swell 2 Height",
+        "shortName": "Hs_s2",
+    },
+    WAVE_SWELL_2_PERIOD: {
+        "units": "s",
+        "description": "Peak period of secondary swell component",
+        "displayName": "Swell 2 Period",
+        "shortName": "T_s2",
+    },
+    WAVE_SWELL_2_CONFIDENCE: {
+        "units": "ratio",
+        "description": "Confidence in secondary swell partition",
+        "displayName": "Swell 2 Confidence",
+        "shortName": "C_s2",
         "displayScale": {"lower": 0, "upper": 1, "type": "linear"},
     },
 }

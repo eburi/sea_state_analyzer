@@ -41,8 +41,17 @@ from paths import (
     WAVE_PERIOD,
     WAVE_PERIOD_CONFIDENCE,
     WAVE_SIGNIFICANT_HEIGHT,
+    WAVE_SWELL_1_CONFIDENCE,
+    WAVE_SWELL_1_HEIGHT,
+    WAVE_SWELL_1_PERIOD,
+    WAVE_SWELL_2_CONFIDENCE,
+    WAVE_SWELL_2_HEIGHT,
+    WAVE_SWELL_2_PERIOD,
     WAVE_TRUE_PERIOD,
     WAVE_TRUE_WAVELENGTH,
+    WAVE_WIND_WAVE_CONFIDENCE,
+    WAVE_WIND_WAVE_HEIGHT,
+    WAVE_WIND_WAVE_PERIOD,
 )
 
 logger = logging.getLogger(__name__)
@@ -101,6 +110,30 @@ def _motion_estimate_to_values(
     # Heave displacement (metres) — from Kalman filter
     if me.heave is not None:
         pairs.append((HEAVE, round(me.heave, 3)))
+
+    # Spectral partitions — wind-wave
+    if me.wind_wave_height is not None:
+        pairs.append((WAVE_WIND_WAVE_HEIGHT, round(me.wind_wave_height, 2)))
+    if me.wind_wave_period is not None:
+        pairs.append((WAVE_WIND_WAVE_PERIOD, round(me.wind_wave_period, 1)))
+    if me.wind_wave_confidence is not None:
+        pairs.append((WAVE_WIND_WAVE_CONFIDENCE, round(me.wind_wave_confidence, 2)))
+
+    # Spectral partitions — primary swell
+    if me.swell_1_height is not None:
+        pairs.append((WAVE_SWELL_1_HEIGHT, round(me.swell_1_height, 2)))
+    if me.swell_1_period is not None:
+        pairs.append((WAVE_SWELL_1_PERIOD, round(me.swell_1_period, 1)))
+    if me.swell_1_confidence is not None:
+        pairs.append((WAVE_SWELL_1_CONFIDENCE, round(me.swell_1_confidence, 2)))
+
+    # Spectral partitions — secondary swell
+    if me.swell_2_height is not None:
+        pairs.append((WAVE_SWELL_2_HEIGHT, round(me.swell_2_height, 2)))
+    if me.swell_2_period is not None:
+        pairs.append((WAVE_SWELL_2_PERIOD, round(me.swell_2_period, 1)))
+    if me.swell_2_confidence is not None:
+        pairs.append((WAVE_SWELL_2_CONFIDENCE, round(me.swell_2_confidence, 2)))
 
     return [{"path": path, "value": value} for path, value in pairs]
 

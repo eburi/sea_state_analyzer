@@ -1,14 +1,17 @@
-# boat_state – Signal K Wave Motion Learner
+# boat_state – Signal K Wave State Monitor
 
-A Python prototype that connects to a Signal K server, ingests vessel self
-data in real time, extracts motion features, and derives inferred sea-state
-proxies from onboard sensors.
+A Python application that connects to a Signal K marine server, reads an
+onboard IMU (ICM-20948 accelerometer/gyroscope/magnetometer), estimates wave
+conditions including multi-component spectral partitioning (wind-wave, swell 1,
+swell 2), and publishes wave estimates back to Signal K.  Runs as a **Home
+Assistant App** on a Raspberry Pi 5.
 
-> **Domain caution:** This tool infers **vessel motion response to sea state**.
-> It does NOT produce direct measurements of wave height, period, or direction.
-> Sail trim, point of sail, hull form, autopilot behaviour, displacement, and
-> loading all modulate the observed motion.  All outputs are inferred motion
-> proxies, not authoritative environmental measurements.
+> **Domain caution:** Wave height, period, and partition outputs are **estimated
+> from vessel motion** using Kalman-filtered heave, Doppler correction, hull
+> resonance suppression, and spectral analysis.  Sail trim, point of sail, hull
+> form, autopilot behaviour, displacement, and loading all modulate the observed
+> motion.  Outputs improve with calibration data but are not equivalent to
+> dedicated wave buoy measurements.
 
 ---
 
@@ -16,17 +19,25 @@ proxies from onboard sensors.
 
 ```
 src/
-  config.py           – all tunable parameters
-  paths.py            – canonical Signal K path constants
-  models.py           – typed data structures
-  state_store.py      – latest-known self-state, freshness tracking
-  signalk_client.py   – WebSocket client, reconnect, subscription
-  feature_extractor.py – Layer A/B/C feature extraction
-  recorder.py         – JSONL + Parquet output
-  plotter.py          – console summaries + matplotlib PNGs
-  main.py             – CLI entry point (live / inspect / replay)
-tests/              – pytest unit tests
-conftest.py         – adds src/ to sys.path for pytest
+  config.py            – all tunable parameters (Config dataclass + DEFAULT_CONFIG)
+  paths.py             – canonical Signal K path constants (self-data only)
+  models.py            – typed data structures (RawDeltaMessage → InstantSample → WindowFeatures → MotionEstimate)
+  signalk_client.py    – WebSocket client, reconnect backoff, explicit subscriptions
+  signalk_auth.py      – Signal K device access request flow + JWT token persistence
+  signalk_publisher.py – Delta/meta building for publishing wave estimates back to Signal K
+  state_store.py       – latest-known self-state, freshness tracking, InstantSample snapshots
+  feature_extractor.py – Layer A (derivatives), Layer B (rolling stats/PSD), Layer C (inferred proxies)
+  heave_estimator.py   – Kalman heave filter, trochoidal Hs, Doppler correction, spectral partitioning
+  vessel_config.py     – Hull parameters, RAO gain model, hull classification
+  imu_registry.py      – IMU chip registry (WHO_AM_I values, I2C addresses)
+  imu_detect.py        – I2C bus scanning and chip identification
+  imu_reader.py        – ICM-20948 driver + async wrapper with auto-detect support
+  recorder.py          – batched JSONL + Parquet output
+  plotter.py           – console summaries + optional matplotlib PNGs
+  main.py              – CLI entry point: live / inspect / replay modes
+tests/                 – pytest unit tests (494 tests)
+conftest.py            – adds src/ to sys.path for pytest
+boat_wave_state/       – Home Assistant App packaging (config.yaml, Dockerfile, run.sh)
 ```
 
 ---
@@ -136,9 +147,122 @@ All outputs are written to a session-stamped directory under `output/`:
 | `path_inventory.md` | Markdown | Inspect-mode path report |
 | `plot_*.png` | PNG | Optional matplotlib plots |
 
+### events.jsonl schema
+
+Each line is a JSON object with these fields (None values omitted):
+
+| Field | Units | Description |
+|-------|-------|-------------|
+| `timestamp` | ISO-8601 | Estimate time (UTC) |
+| `latitude`, `longitude` | degrees | Vessel position at estimate time |
+| `motion_severity` | 0–1 | Composite motion severity score |
+| `motion_regime` | string | calm / moderate / active / heavy |
+| `significant_height` | metres | Estimated Hs from IMU accelerometer |
+| `heave` | metres | Current heave displacement (Kalman) |
+| `encounter_period_estimate` | seconds | Dominant encounter period |
+| `true_wave_period` | seconds | Doppler-corrected true wave period |
+| `true_wavelength` | metres | True wavelength (deep-water dispersion) |
+| `encounter_direction` | string | beam_like / head_or_following_like / ... |
+| `comfort_proxy` | 0–1 | Motion comfort index |
+| `wind_wave_height` | metres | Hs of wind-wave spectral partition |
+| `wind_wave_period` | seconds | Peak period of wind-wave partition |
+| `wind_wave_confidence` | 0–1 | Confidence in wind-wave partition |
+| `swell_1_height` | metres | Hs of primary swell partition |
+| `swell_1_period` | seconds | Peak period of primary swell |
+| `swell_1_confidence` | 0–1 | Confidence in primary swell partition |
+| `swell_2_height` | metres | Hs of secondary swell partition |
+| `swell_2_period` | seconds | Peak period of secondary swell |
+| `swell_2_confidence` | 0–1 | Confidence in secondary swell partition |
+
 All Parquet files include `timestamp` (ISO-8601 string) and `timestamp_epoch`
 (float Unix seconds) columns, plus freshness metadata columns (`age_*`,
 `valid_*`) on every sample row.
+
+---
+
+## Wave estimation pipeline
+
+### IMU integration
+
+The ICM-20948 9-DOF IMU (accelerometer + gyroscope + magnetometer) is read
+directly over I2C at 25 Hz.  The IMU is mounted vertically on a wall; gravity
+calibration uses dot-product projection to determine the gravity axis
+automatically regardless of mounting orientation.
+
+Vertical acceleration is extracted by subtracting the gravity component,
+then fed into the heave estimation pipeline.
+
+### Heave estimation (Kalman filter)
+
+Vertical acceleration is double-integrated into heave displacement using a
+Kalman filter with zero-mean drift correction on the third integral (velocity
+and position bias).  The bias window (5000 samples) prevents long-term drift
+while preserving wave-frequency content.
+
+### Significant wave height (Hs)
+
+Hs is computed as `4 * sqrt(m0)` from the zeroth spectral moment of the
+Kalman-filtered displacement PSD, after hull resonance suppression (see below).
+A trochoidal model provides an independent cross-check from peak vertical
+acceleration.
+
+### Hull resonance suppression
+
+Catamaran hull resonance (~0.33 Hz / 3 s for a 14 m hull) amplifies the
+displacement PSD at frequencies that don't correspond to real waves.  A
+Gaussian notch filter suppresses this resonance peak before computing Hs.
+Hull parameters (LOA, beam, hull type) are defined in `vessel_config.py`.
+
+### Doppler correction
+
+Encounter frequency (observed on the moving boat) differs from true wave
+frequency.  The correction uses `delta_v = STW * cos(TWA)` to recover the
+source wave period and wavelength via deep-water dispersion relation.
+Speed through water (STW) is preferred over SOG when available.
+
+### Multi-peak spectral partitioning
+
+The displacement PSD (after hull resonance suppression) is partitioned into
+up to 3 spectral components using `scipy.signal.find_peaks` with
+prominence-based peak detection:
+
+1. **Wind wave** — highest-frequency partition
+2. **Swell 1** — primary swell (mid-frequency)
+3. **Swell 2** — secondary swell (lowest-frequency)
+
+The spectrum is split at local minima between adjacent peaks.  Each partition
+gets its own `Hs = 4*sqrt(m0)` from integrated spectral energy, plus peak
+period and confidence (from energy share x peak sharpness).
+
+This labeling matches the convention used by Windy, Open-Meteo, and Copernicus
+(MFWAM) forecast models, enabling direct comparison of observed vs forecast
+partition data.
+
+### Signal K publishing
+
+Wave estimates are published back to Signal K via authenticated WebSocket
+delta messages.  Published paths include:
+
+| Signal K path | Description |
+|---------------|-------------|
+| `environment.water.waves.significantHeight` | Total Hs (metres) |
+| `environment.water.waves.period` | Encounter period (seconds) |
+| `environment.water.waves.truePeriod` | Doppler-corrected period |
+| `environment.water.waves.trueWavelength` | True wavelength (metres) |
+| `environment.water.waves.motionSeverity` | Severity index (0-1) |
+| `environment.water.waves.motionRegime` | calm/moderate/active/heavy |
+| `environment.water.waves.encounterDirection` | Direction relative to heading |
+| `environment.water.waves.comfortProxy` | Comfort index (0-1) |
+| `environment.water.waves.windWave.height` | Wind-wave Hs (metres) |
+| `environment.water.waves.windWave.period` | Wind-wave peak period |
+| `environment.water.waves.swell1.height` | Primary swell Hs (metres) |
+| `environment.water.waves.swell1.period` | Primary swell peak period |
+| `environment.water.waves.swell2.height` | Secondary swell Hs (metres) |
+| `environment.water.waves.swell2.period` | Secondary swell peak period |
+| `environment.heave` | Current heave displacement |
+
+Meta deltas with units, descriptions, and display names are sent on startup
+so Signal K dashboards can display proper labels.
 
 ---
 
@@ -222,19 +346,35 @@ pytest tests/ -v
 
 ---
 
-## Deployment goal
+## Deployment
 
-The long-term target is a **Home Assistant Add-on** (formerly called "Addon") that runs alongside the Signal K Add-on on the same host and continuously analyses wave state in the background. The two add-ons communicate over the local network — boat_state connects to Signal K's WebSocket API just as it does today.
+The application runs as a **Home Assistant App** (formerly "Add-on") alongside
+the Signal K App on a Raspberry Pi 5 running HAOS.
 
-A **Signal K plugin** is a possible alternative packaging, but the project is designed to stay independent of Signal K internals so it can outlive any future migration away from Signal K. Converting to a Signal K plugin later would be straightforward since the only integration point is the WebSocket delta stream.
+### Deploying to Home Assistant
 
-Design decisions that support this:
+```bash
+# Copy files to HA host and rebuild
+bash boat_wave_state/deploy.sh root@192.168.46.222
+
+# Rebuild and restart on HA
+ssh root@192.168.46.222 "ha apps rebuild local_boat_wave_state && ha apps start local_boat_wave_state"
+```
+
+The app packaging lives in `boat_wave_state/` with:
+- `config.yaml` — app metadata, device mappings (`/dev/i2c-1` for IMU)
+- `Dockerfile` — `ARG BUILD_FROM` / `FROM $BUILD_FROM` pattern
+- `run.sh` — entry point
+- `requirements.txt` — Python dependencies
+
+### Design decisions
 
 - The only external dependency is Signal K's WebSocket delta API — no Signal K library imports, no plugin SDK.
-- All configuration lives in `config.py` and can be mapped to Home Assistant Add-on options (`options.json` / UI schema) without code changes.
-- The process is a single long-running async Python application, which fits the Home Assistant Add-on model (one container, one process).
-- Output files are written to a configurable directory that can be mapped to a Home Assistant `/share` or `/data` volume.
-- No macOS-specific code; runs on Raspberry Pi 5 / Linux as-is.
+- All configuration lives in `config.py` and environment variables.
+- Single long-running async Python process.
+- Output files written to `/root/share/boat_wave_state/` on HA (mapped volume).
+- JWT token persisted at `/data/signalk_token.json` for reconnection.
+- Graceful degradation: works on macOS without IMU (attitude-only estimation).
 
 ---
 
@@ -257,36 +397,44 @@ Both methods require **Doppler correction**: the boat moves relative to wave fro
 
 ### Current state vs bareboat-necessities approach
 
-What boat_state **already does well**:
-- Classification pipeline (severity, regime, direction, regularity, comfort, trend) — the bareboat article does not attempt this
-- Spectral band decomposition (0.05–0.1, 0.1–0.2, 0.2–0.4, 0.4–1.0 Hz) that can separate swell from wind waves
-- Robust reconnection, missing-data handling, and recording infrastructure
+What boat_state **implements**:
+- Kalman-filtered heave estimation (double-integrated vertical acceleration with drift correction)
+- Trochoidal wave height model as cross-check
+- Doppler correction using STW and TWA to recover true wave period/wavelength
+- Hull resonance suppression (Gaussian notch at catamaran resonant frequency)
+- Multi-peak spectral partitioning (wind-wave, swell 1, swell 2)
+- RAO-aware confidence adjustment based on hull parameters
+- Classification pipeline (severity, regime, direction, regularity, comfort, trend)
+- Signal K publishing with meta deltas for dashboard integration
+- Position recording on every estimate for forecast comparison
 
-What boat_state is **missing** for actual wave measurement:
-- No vertical acceleration data (would need `navigation.acceleration` or raw IMU from Signal K)
-- No Doppler correction — all period/frequency estimates are encounter values, not true wave values
-- No heave/displacement estimation (no Kalman filter or double integration)
-- No speed-through-water derivation (needed for Doppler correction, but could be computed from existing heading/COG/SOG data)
-- Head vs following seas are indistinguishable (the Doppler sign resolves this, but it is not implemented)
+What boat_state is **missing** for full wave measurement:
+- Wave direction estimation (requires cross-spectral analysis between roll/pitch/heave)
+- Aranovskiy online frequency estimator (currently using Welch PSD)
+- Swell vs wind-wave direction separation
+- Douglas sea-state scale mapping for logbook entries
 
 ### Incremental path forward
 
-1. Derive speed through water (SPD) from heading–COG difference (data already available)
-2. Add Doppler correction to convert encounter periods to true wave periods
-3. Subscribe to accelerometer data if available on the Signal K server
-4. Implement trochoidal wave height estimation (requires accel data)
-5. Implement Kalman heave estimation (requires accel data)
-6. Use spectral bands to report swell vs wind-wave components separately
-7. Map outputs to Douglas sea-state scale for logbook use
+1. ~~Derive speed through water~~ ✓ (uses STW from Signal K when available)
+2. ~~Doppler correction~~ ✓ (encounter → true wave period/wavelength)
+3. ~~IMU accelerometer integration~~ ✓ (ICM-20948 at 25 Hz over I2C)
+4. ~~Trochoidal wave height estimation~~ ✓
+5. ~~Kalman heave estimation~~ ✓
+6. ~~Spectral partitioning (swell vs wind-wave)~~ ✓
+7. Douglas sea-state scale mapping for logbook use
+8. Wave direction estimation from cross-spectral roll/pitch/heave analysis
+9. Forecast comparison pipeline (Open-Meteo live, Copernicus for training backfill)
+10. Calibration model training on multi-boat partition data
 
 ---
 
 ## Future development
 
-1. **Clustering (Stage 2):** Use `features_60s.parquet` with KMeans / Gaussian Mixture / HDBSCAN to discover natural motion regimes.
-2. **Label collection (Stage 3):** Apply manual labels (calm / moderate / rough / surfing / confused) to regime clusters.
-3. **Supervised models:** Train random forest or gradient boosting on the labelled feature matrix.
-4. **Raspberry Pi 5 deployment:** The pipeline is async and has no macOS dependencies; deploy with the same `requirements.txt` on Pi OS.
-5. **Home Assistant Add-on packaging:** Dockerfile, `config.yaml`, and `options.json` for the HA Add-on store. Expose motion severity and regime as HA sensors via the Supervisor API or MQTT.
+1. **Douglas scale mapping:** Map Hs + period to Douglas sea-state numbers for logbook entries.
+2. **Wave direction estimation:** Cross-spectral analysis of roll, pitch, and heave to infer wave propagation direction.
+3. **Forecast comparison:** Ingest Open-Meteo marine API (live) and Copernicus MFWAM (backfill) partition data; compare observed vs forecast Hs, period, and partition breakdown at recorded positions.
+4. **Calibration models:** Train hull-specific correction models on accumulated partition data with forecast labels.
+5. **Multi-boat ML:** Collect partition-level features + position from multiple boats to build a generalized wave estimation model.
 6. **Signal K plugin (optional):** Wrap the core in a Signal K server plugin if tight integration is preferred. This is a packaging change only — the analysis code stays the same.
-7. **Polar performance companion:** A second add-on that correlates boat speed with wind and sea state to learn vessel polar performance over time. Depends on sea-state output from this project.
+7. **Polar performance companion:** A second app that correlates boat speed with wind and sea state to learn vessel polar performance over time. Depends on sea-state output from this project.

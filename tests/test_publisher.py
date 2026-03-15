@@ -34,8 +34,17 @@ from paths import (
     WAVE_PERIOD,
     WAVE_PERIOD_CONFIDENCE,
     WAVE_SIGNIFICANT_HEIGHT,
+    WAVE_SWELL_1_CONFIDENCE,
+    WAVE_SWELL_1_HEIGHT,
+    WAVE_SWELL_1_PERIOD,
+    WAVE_SWELL_2_CONFIDENCE,
+    WAVE_SWELL_2_HEIGHT,
+    WAVE_SWELL_2_PERIOD,
     WAVE_TRUE_PERIOD,
     WAVE_TRUE_WAVELENGTH,
+    WAVE_WIND_WAVE_CONFIDENCE,
+    WAVE_WIND_WAVE_HEIGHT,
+    WAVE_WIND_WAVE_PERIOD,
 )
 
 
@@ -179,6 +188,73 @@ class TestMotionEstimateToValues:
         enc = next(v for v in values if v["path"] == WAVE_ENCOUNTER_PERIOD)
         per = next(v for v in values if v["path"] == WAVE_PERIOD)
         assert enc["value"] == per["value"] == 7.3
+
+    def test_wind_wave_partition_published(self) -> None:
+        me = _make_estimate(
+            wind_wave_height=1.2,
+            wind_wave_period=5.5,
+            wind_wave_confidence=0.78,
+        )
+        values = _motion_estimate_to_values(me)
+        paths = [v["path"] for v in values]
+        assert WAVE_WIND_WAVE_HEIGHT in paths
+        assert WAVE_WIND_WAVE_PERIOD in paths
+        assert WAVE_WIND_WAVE_CONFIDENCE in paths
+        ht = next(v for v in values if v["path"] == WAVE_WIND_WAVE_HEIGHT)
+        assert ht["value"] == 1.2
+
+    def test_swell_1_partition_published(self) -> None:
+        me = _make_estimate(
+            swell_1_height=0.8,
+            swell_1_period=9.3,
+            swell_1_confidence=0.65,
+        )
+        values = _motion_estimate_to_values(me)
+        paths = [v["path"] for v in values]
+        assert WAVE_SWELL_1_HEIGHT in paths
+        assert WAVE_SWELL_1_PERIOD in paths
+        assert WAVE_SWELL_1_CONFIDENCE in paths
+        tp = next(v for v in values if v["path"] == WAVE_SWELL_1_PERIOD)
+        assert tp["value"] == 9.3
+
+    def test_swell_2_partition_published(self) -> None:
+        me = _make_estimate(
+            swell_2_height=0.5,
+            swell_2_period=14.1,
+            swell_2_confidence=0.42,
+        )
+        values = _motion_estimate_to_values(me)
+        paths = [v["path"] for v in values]
+        assert WAVE_SWELL_2_HEIGHT in paths
+        assert WAVE_SWELL_2_PERIOD in paths
+        assert WAVE_SWELL_2_CONFIDENCE in paths
+
+    def test_partition_none_omitted(self) -> None:
+        """Partition fields that are None should not appear in output."""
+        me = _make_estimate(
+            wind_wave_height=1.0,
+            wind_wave_period=None,
+            wind_wave_confidence=None,
+            swell_1_height=None,
+        )
+        values = _motion_estimate_to_values(me)
+        paths = [v["path"] for v in values]
+        assert WAVE_WIND_WAVE_HEIGHT in paths
+        assert WAVE_WIND_WAVE_PERIOD not in paths
+        assert WAVE_WIND_WAVE_CONFIDENCE not in paths
+        assert WAVE_SWELL_1_HEIGHT not in paths
+
+    def test_partition_rounding(self) -> None:
+        me = _make_estimate(
+            wind_wave_height=1.234,
+            wind_wave_period=5.678,
+            wind_wave_confidence=0.789,
+        )
+        values = _motion_estimate_to_values(me)
+        by_path = {v["path"]: v["value"] for v in values}
+        assert by_path[WAVE_WIND_WAVE_HEIGHT] == 1.23   # 2 decimal places
+        assert by_path[WAVE_WIND_WAVE_PERIOD] == 5.7    # 1 decimal place
+        assert by_path[WAVE_WIND_WAVE_CONFIDENCE] == 0.79  # 2 decimal places
 
 
 # --------------------------------------------------------------------------- #
@@ -504,3 +580,34 @@ class TestBuildMetaDelta:
             # Mutating the parsed output should not affect the source dict
             entry["value"]["_test_key"] = True
             assert "_test_key" not in WAVE_PATH_META[path]
+
+    def test_partition_paths_have_meta(self) -> None:
+        """All 9 partition paths must have meta entries."""
+        msg = build_meta_delta()
+        parsed = json.loads(msg)
+        meta = parsed["updates"][0]["meta"]
+        paths = {e["path"] for e in meta}
+        for p in [
+            WAVE_WIND_WAVE_HEIGHT, WAVE_WIND_WAVE_PERIOD, WAVE_WIND_WAVE_CONFIDENCE,
+            WAVE_SWELL_1_HEIGHT, WAVE_SWELL_1_PERIOD, WAVE_SWELL_1_CONFIDENCE,
+            WAVE_SWELL_2_HEIGHT, WAVE_SWELL_2_PERIOD, WAVE_SWELL_2_CONFIDENCE,
+        ]:
+            assert p in paths, f"Missing meta for partition path {p}"
+
+    def test_partition_height_meta_has_units_m(self) -> None:
+        """All partition height paths should have units 'm'."""
+        msg = build_meta_delta()
+        parsed = json.loads(msg)
+        meta = parsed["updates"][0]["meta"]
+        for path in [WAVE_WIND_WAVE_HEIGHT, WAVE_SWELL_1_HEIGHT, WAVE_SWELL_2_HEIGHT]:
+            entry = next(e for e in meta if e["path"] == path)
+            assert entry["value"]["units"] == "m"
+
+    def test_partition_period_meta_has_units_s(self) -> None:
+        """All partition period paths should have units 's'."""
+        msg = build_meta_delta()
+        parsed = json.loads(msg)
+        meta = parsed["updates"][0]["meta"]
+        for path in [WAVE_WIND_WAVE_PERIOD, WAVE_SWELL_1_PERIOD, WAVE_SWELL_2_PERIOD]:
+            entry = next(e for e in meta if e["path"] == path)
+            assert entry["value"]["units"] == "s"
