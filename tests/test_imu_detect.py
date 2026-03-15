@@ -23,6 +23,7 @@ from imu_detect import (
     _scan_bus,
     detect_imu,
     detect_imu_on_bus,
+    discover_i2c_buses,
 )
 
 
@@ -308,6 +309,67 @@ class TestDetectIMU:
             assert result.bus_number == 3
             # Should have stopped after finding on bus 3, not scanning bus 4
             assert call_count == 3
+
+    def test_detect_imu_auto_discovers_buses(self) -> None:
+        """detect_imu() with no args auto-discovers buses from /dev."""
+        with patch("imu_detect.discover_i2c_buses", return_value=[0, 1, 5]):
+            with patch("imu_detect.detect_imu_on_bus", return_value=None) as mock_bus:
+                result = detect_imu()
+                assert result is None
+                # Should have scanned buses 0, 1, 5
+                assert mock_bus.call_count == 3
+                mock_bus.assert_any_call(0)
+                mock_bus.assert_any_call(1)
+                mock_bus.assert_any_call(5)
+
+    def test_detect_imu_fallback_bus1_when_no_buses_found(self) -> None:
+        """detect_imu() falls back to [1] when discover finds nothing."""
+        with patch("imu_detect.discover_i2c_buses", return_value=[]):
+            with patch("imu_detect.detect_imu_on_bus", return_value=None) as mock_bus:
+                result = detect_imu()
+                assert result is None
+                mock_bus.assert_called_once_with(1)
+
+
+# --------------------------------------------------------------------------- #
+# discover_i2c_buses tests                                                     #
+# --------------------------------------------------------------------------- #
+
+class TestDiscoverI2CBuses:
+    def test_discovers_standard_buses(self) -> None:
+        """Should parse /dev/i2c-N entries correctly."""
+        fake_paths = ["/dev/i2c-0", "/dev/i2c-1", "/dev/i2c-3"]
+        with patch("imu_detect.glob.glob", return_value=fake_paths):
+            buses = discover_i2c_buses()
+            assert buses == [0, 1, 3]
+
+    def test_returns_empty_when_no_buses(self) -> None:
+        """Should return empty list when no i2c devices exist."""
+        with patch("imu_detect.glob.glob", return_value=[]):
+            buses = discover_i2c_buses()
+            assert buses == []
+
+    def test_ignores_non_numeric_entries(self) -> None:
+        """Should skip entries that don't match i2c-N pattern."""
+        fake_paths = ["/dev/i2c-1", "/dev/i2c-foo", "/dev/i2c-3"]
+        with patch("imu_detect.glob.glob", return_value=fake_paths):
+            buses = discover_i2c_buses()
+            assert buses == [1, 3]
+
+    def test_returns_sorted(self) -> None:
+        """Should return bus numbers in sorted order."""
+        fake_paths = ["/dev/i2c-10", "/dev/i2c-1", "/dev/i2c-5"]
+        with patch("imu_detect.glob.glob", return_value=fake_paths):
+            buses = discover_i2c_buses()
+            assert buses == [1, 5, 10]
+
+    def test_handles_high_bus_numbers(self) -> None:
+        """Should handle bus numbers up to 20 and beyond."""
+        fake_paths = [f"/dev/i2c-{i}" for i in range(21)]
+        with patch("imu_detect.glob.glob", return_value=fake_paths):
+            buses = discover_i2c_buses()
+            assert buses == list(range(21))
+            assert len(buses) == 21
 
 
 # --------------------------------------------------------------------------- #

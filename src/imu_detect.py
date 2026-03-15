@@ -6,16 +6,24 @@ and expected to be called from an executor thread.
 
 Usage::
 
-    from imu_detect import detect_imu
+    from imu_detect import detect_imu, discover_i2c_buses
 
-    result = detect_imu(bus_number=1)
+    # Auto-discover available buses and scan for IMU
+    result = detect_imu()
     if result is not None:
-        chip_info, address = result
-        print(f"Found {chip_info.chip_name} at 0x{address:02X}")
+        print(f"Found {result.chip.chip_name} at bus={result.bus_number} "
+              f"addr=0x{result.address:02X}")
+
+    # Or discover buses explicitly
+    buses = discover_i2c_buses()   # e.g. [0, 1, 3]
+    result = detect_imu(bus_numbers=buses)
 """
 from __future__ import annotations
 
+import glob
 import logging
+import os
+import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -58,6 +66,27 @@ def _read_register(bus: "smbus2.SMBus", address: int, register: int) -> Optional
         return bus.read_byte_data(address, register)
     except OSError:
         return None
+
+
+def discover_i2c_buses() -> List[int]:
+    """Discover available I2C bus numbers by scanning ``/dev/i2c-*``.
+
+    Returns a sorted list of bus numbers that exist on the host, e.g.
+    ``[0, 1, 3]``.  This is more reliable than hard-coding bus numbers
+    because different boards / HATs expose the IMU on different buses.
+    """
+    buses: List[int] = []
+    for path in glob.glob("/dev/i2c-*"):
+        basename = os.path.basename(path)
+        m = re.match(r"i2c-(\d+)$", basename)
+        if m is not None:
+            buses.append(int(m.group(1)))
+    buses.sort()
+    if buses:
+        logger.debug("Discovered I2C buses: %s", buses)
+    else:
+        logger.debug("No I2C buses found in /dev")
+    return buses
 
 
 def detect_imu_on_bus(bus_number: int = 1) -> Optional[DetectionResult]:
@@ -131,14 +160,16 @@ def detect_imu(bus_numbers: Optional[List[int]] = None) -> Optional[DetectionRes
     """Scan one or more I2C buses for a known IMU chip.
 
     Args:
-        bus_numbers: List of I2C bus numbers to scan. Defaults to [1]
-                     (the standard bus on Raspberry Pi).
+        bus_numbers: List of I2C bus numbers to scan.  When ``None``,
+                     auto-discovers available buses via
+                     :func:`discover_i2c_buses` and falls back to
+                     ``[1]`` if none are found.
 
     Returns:
         DetectionResult for the first chip found, or None.
     """
     if bus_numbers is None:
-        bus_numbers = [1]
+        bus_numbers = discover_i2c_buses() or [1]
 
     for bus_num in bus_numbers:
         result = detect_imu_on_bus(bus_num)

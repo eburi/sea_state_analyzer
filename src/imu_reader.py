@@ -386,27 +386,28 @@ class IMUReader:
     ) -> Optional["IMUReader"]:
         """Try to open the IMU.  Returns None if hardware is unavailable.
 
-        When *auto_detect* is True, scans the bus for known IMU chips
-        before falling back to *address*.  Currently only ICM-20948 has
-        a full driver; other detected chips are logged but the reader
-        still attempts ICM-20948 init at the detected address.
+        When *auto_detect* is True, discovers all available I2C buses
+        and scans each one for known IMU chips before falling back to
+        *address* on *bus_number*.  Currently only ICM-20948 has a full
+        driver; other detected chips are logged but the reader still
+        attempts ICM-20948 init at the detected address.
         """
         detected_chip_name = "ICM-20948"
         effective_address = address
+        effective_bus = bus_number
 
         if auto_detect:
             try:
-                from imu_detect import detect_imu_on_bus
+                from imu_detect import detect_imu, discover_i2c_buses
                 loop = asyncio.get_running_loop()
-                result = await loop.run_in_executor(
-                    None, lambda: detect_imu_on_bus(bus_number)
-                )
+                result = await loop.run_in_executor(None, detect_imu)
                 if result is not None:
                     detected_chip_name = result.chip.chip_name
                     effective_address = result.address
+                    effective_bus = result.bus_number
                     logger.info(
                         "Auto-detected %s at bus=%d addr=0x%02X",
-                        detected_chip_name, bus_number, effective_address,
+                        detected_chip_name, effective_bus, effective_address,
                     )
                     if detected_chip_name != "ICM-20948":
                         logger.warning(
@@ -416,24 +417,25 @@ class IMUReader:
                         )
                 else:
                     logger.info(
-                        "Auto-detect found no known IMU on bus %d; "
-                        "falling back to addr=0x%02X",
+                        "Auto-detect found no known IMU on any bus; "
+                        "falling back to bus=%d addr=0x%02X",
                         bus_number, address,
                     )
             except Exception as exc:
-                logger.debug("Auto-detect failed: %s — falling back to 0x%02X", exc, address)
+                logger.debug("Auto-detect failed: %s — falling back to bus=%d 0x%02X",
+                             exc, bus_number, address)
 
         try:
             loop = asyncio.get_running_loop()
             driver = await loop.run_in_executor(
-                None, lambda: _ICM20948Driver(bus_number, effective_address)
+                None, lambda: _ICM20948Driver(effective_bus, effective_address)
             )
             await loop.run_in_executor(None, driver.init)
             reader = cls(driver, chip_name=detected_chip_name)
             reader._loop = loop
             logger.info(
                 "IMU reader ready (%s, bus=%d, addr=0x%02X)",
-                detected_chip_name, bus_number, effective_address,
+                detected_chip_name, effective_bus, effective_address,
             )
             return reader
         except Exception as exc:
