@@ -3,6 +3,7 @@
 All angles are in radians, speeds in m/s, time as timezone-aware UTC datetimes
 unless explicitly noted otherwise.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -14,32 +15,37 @@ from typing import Any, Dict, List, Optional
 # Raw ingest                                                                   #
 # --------------------------------------------------------------------------- #
 
+
 @dataclass
 class RawDeltaMessage:
     """A Signal K delta exactly as received from the WebSocket."""
-    received_at: datetime          # wall-clock UTC time of receipt
-    context: str                   # e.g. "vessels.self" or full URN
+
+    received_at: datetime  # wall-clock UTC time of receipt
+    context: str  # e.g. "vessels.self" or full URN
     updates: List[Dict[str, Any]]  # the raw 'updates' array
-    raw: Dict[str, Any]            # full unparsed message dict
+    raw: Dict[str, Any]  # full unparsed message dict
 
 
 @dataclass
 class SignalKValueUpdate:
     """A single path/value pair extracted from a delta update."""
+
     path: str
     value: Any
     source: Optional[str]
     timestamp: Optional[datetime]  # source timestamp if present
-    received_at: datetime          # wall-clock receipt time
+    received_at: datetime  # wall-clock receipt time
 
 
 # --------------------------------------------------------------------------- #
 # State store internals                                                        #
 # --------------------------------------------------------------------------- #
 
+
 @dataclass
 class FieldState:
     """Current known state of a single Signal K path."""
+
     value: Any
     source: Optional[str]
     source_timestamp: Optional[datetime]
@@ -53,6 +59,7 @@ class FieldState:
 # Canonical vessel self snapshot                                               #
 # --------------------------------------------------------------------------- #
 
+
 @dataclass
 class InstantSample:
     """
@@ -62,6 +69,7 @@ class InstantSample:
     are None.  field_ages gives the data age in seconds for each field;
     field_valid gives the freshness boolean (age < stale_threshold).
     """
+
     timestamp: datetime
 
     # Attitude (rad)
@@ -70,30 +78,30 @@ class InstantSample:
     yaw: Optional[float] = None
 
     # Movement
-    sog: Optional[float] = None      # m/s
-    cog: Optional[float] = None      # rad
+    sog: Optional[float] = None  # m/s
+    cog: Optional[float] = None  # rad
     heading: Optional[float] = None  # rad
 
     # Speed through water
-    stw: Optional[float] = None          # m/s (paddle wheel / log)
+    stw: Optional[float] = None  # m/s (paddle wheel / log)
 
     # Wind
-    wind_speed_true: Optional[float] = None      # m/s
-    wind_angle_true: Optional[float] = None      # rad, relative to bow
+    wind_speed_true: Optional[float] = None  # m/s
+    wind_angle_true: Optional[float] = None  # rad, relative to bow
     wind_direction_true: Optional[float] = None  # rad, relative to true north
     wind_speed_apparent: Optional[float] = None  # m/s
     wind_angle_apparent: Optional[float] = None  # rad, relative to bow
 
     # Current
     current_drift: Optional[float] = None  # m/s
-    current_set: Optional[float] = None    # rad (direction current flows toward)
+    current_set: Optional[float] = None  # rad (direction current flows toward)
 
     # Steering
-    rudder_angle: Optional[float] = None   # rad
+    rudder_angle: Optional[float] = None  # rad
     autopilot_state: Optional[str] = None  # wind / route / standby
 
     # Depth
-    depth: Optional[float] = None          # metres below transducer
+    depth: Optional[float] = None  # metres below transducer
 
     # IMU accelerometer (m/s²) — raw, in sensor frame
     accel_x: Optional[float] = None
@@ -121,7 +129,7 @@ class InstantSample:
     longitude: Optional[float] = None
 
     # Freshness metadata
-    field_ages: Dict[str, float] = field(default_factory=dict)   # seconds
+    field_ages: Dict[str, float] = field(default_factory=dict)  # seconds
     field_valid: Dict[str, bool] = field(default_factory=dict)
 
 
@@ -129,34 +137,38 @@ class InstantSample:
 # Layer A: instantaneous derived values                                        #
 # --------------------------------------------------------------------------- #
 
+
 @dataclass
 class LayerAFeatures:
     """Instantaneous derived motion metrics computed from consecutive samples."""
+
     timestamp: datetime
 
-    roll_rate: Optional[float] = None          # rad/s
-    pitch_rate: Optional[float] = None         # rad/s
-    yaw_rate_derived: Optional[float] = None   # rad/s (from attitude, not RoT sensor)
+    roll_rate: Optional[float] = None  # rad/s
+    pitch_rate: Optional[float] = None  # rad/s
+    yaw_rate_derived: Optional[float] = None  # rad/s (from attitude, not RoT sensor)
 
     roll_acceleration: Optional[float] = None  # rad/s²
     pitch_acceleration: Optional[float] = None
     yaw_acceleration: Optional[float] = None
 
     heading_minus_cog: Optional[float] = None  # rad, leeway proxy
-    wind_angle_true_bow: Optional[float] = None    # rad, true wind angle relative to bow
+    wind_angle_true_bow: Optional[float] = None  # rad, true wind angle relative to bow
     wind_angle_apparent_bow: Optional[float] = None
 
-    roll_normalized: Optional[float] = None    # roll / sog  (dimensionless proxy)
-    pitch_normalized: Optional[float] = None   # pitch / sog
+    roll_normalized: Optional[float] = None  # roll / sog  (dimensionless proxy)
+    pitch_normalized: Optional[float] = None  # pitch / sog
 
 
 # --------------------------------------------------------------------------- #
 # Layer B+C: rolling window features and motion proxies                       #
 # --------------------------------------------------------------------------- #
 
+
 @dataclass
 class WindowFeatures:
     """Rolling-window motion statistics for a single window duration."""
+
     timestamp: datetime
     window_s: float
     n_samples: int
@@ -193,7 +205,9 @@ class WindowFeatures:
     heading_cog_var: Optional[float] = None
     wind_speed_var: Optional[float] = None
     wind_angle_var: Optional[float] = None
-    wind_angle_mean: Optional[float] = None   # rad, circular mean of true wind angle relative to bow
+    wind_angle_mean: Optional[float] = (
+        None  # rad, circular mean of true wind angle relative to bow
+    )
 
     # Spectral entropy (over roll+pitch combined)
     spectral_entropy_roll: Optional[float] = None
@@ -229,6 +243,7 @@ class MotionEstimate:
     or wavelength.  Sail trim, point of sail, hull form, autopilot, loading,
     and displacement all modulate these values.
     """
+
     timestamp: datetime
     window_s: float
 
@@ -250,12 +265,12 @@ class MotionEstimate:
     period_confidence: Optional[float] = None
 
     # Doppler-corrected true wave estimates
-    true_wave_period: Optional[float] = None       # seconds (source wave period)
-    true_wavelength: Optional[float] = None        # metres
-    wave_speed: Optional[float] = None             # m/s (phase velocity)
-    doppler_delta_v: Optional[float] = None        # m/s (STW * cos(TWA))
+    true_wave_period: Optional[float] = None  # seconds (source wave period)
+    true_wavelength: Optional[float] = None  # metres
+    wave_speed: Optional[float] = None  # m/s (phase velocity)
+    doppler_delta_v: Optional[float] = None  # m/s (STW * cos(TWA))
     doppler_correction_valid: Optional[bool] = None  # whether correction was feasible
-    wave_heading: Optional[str] = None             # head / following / beam / quartering
+    wave_heading: Optional[str] = None  # head / following / beam / quartering
 
     # Encounter direction proxy
     # With wind angle: head_like / head_quartering_like / beam_like /
@@ -266,23 +281,23 @@ class MotionEstimate:
     direction_confidence: Optional[float] = None
 
     # Motion character
-    roll_dominant: Optional[bool] = None        # roll > pitch energy
-    motion_regularity: Optional[str] = None     # regular / confused / mixed
-    confusion_index: Optional[float] = None     # 0=regular, 1=confused
+    roll_dominant: Optional[bool] = None  # roll > pitch energy
+    motion_regularity: Optional[str] = None  # regular / confused / mixed
+    confusion_index: Optional[float] = None  # 0=regular, 1=confused
 
     # Comfort proxy (0=comfortable, 1=very uncomfortable)
     comfort_proxy: Optional[float] = None
 
     # Wave height estimation (from IMU accelerometer)
-    significant_height: Optional[float] = None      # metres (Hs)
-    heave: Optional[float] = None                    # metres (current heave displacement)
-    wave_height_method: Optional[str] = None         # "trochoidal" / "kalman"
-    wave_height_confidence: Optional[float] = None   # 0–1
+    significant_height: Optional[float] = None  # metres (Hs)
+    heave: Optional[float] = None  # metres (current heave displacement)
+    wave_height_method: Optional[str] = None  # "trochoidal" / "kalman"
+    wave_height_confidence: Optional[float] = None  # 0–1
 
     # Accelerometer-derived wave frequency (independent of attitude PSD)
-    accel_dominant_freq: Optional[float] = None      # Hz
-    accel_dominant_period: Optional[float] = None    # seconds
-    accel_freq_confidence: Optional[float] = None    # 0–1
+    accel_dominant_freq: Optional[float] = None  # Hz
+    accel_dominant_period: Optional[float] = None  # seconds
+    accel_freq_confidence: Optional[float] = None  # 0–1
 
     # Partitioned wave components from multi-peak spectral analysis
     wind_wave_height: Optional[float] = None
@@ -314,9 +329,11 @@ class MotionEstimate:
 # System status                                                                #
 # --------------------------------------------------------------------------- #
 
+
 @dataclass
 class SystemStatus:
     """Operational state of the pipeline."""
+
     timestamp: datetime
     connected: bool
     ws_url: str

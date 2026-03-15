@@ -4,6 +4,7 @@ Maintains the latest-known value for every Signal K self path.  Incoming
 SignalKValueUpdate objects are merged here.  A consistent InstantSample
 snapshot can be read at any time.
 """
+
 from __future__ import annotations
 
 import asyncio

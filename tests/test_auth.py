@@ -9,13 +9,13 @@ Tests cover:
 - Config auth fields and env var overrides
 - SignalKClient auth token integration
 """
+
 from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -36,6 +36,7 @@ from signalk_auth import (
 # Fixtures                                                                     #
 # --------------------------------------------------------------------------- #
 
+
 @pytest.fixture
 def tmp_token_file(tmp_path: Path) -> Path:
     """Return a temp path for the token file."""
@@ -48,7 +49,9 @@ def config(tmp_token_file: Path) -> Config:
     return Config(auth_token_file=str(tmp_token_file))
 
 
-def _mock_response(status_code: int = 200, json_data: Any = None, text: str = "") -> MagicMock:
+def _mock_response(
+    status_code: int = 200, json_data: Any = None, text: str = ""
+) -> MagicMock:
     """Create a mock httpx.Response."""
     resp = MagicMock()
     resp.status_code = status_code
@@ -60,6 +63,7 @@ def _mock_response(status_code: int = 200, json_data: Any = None, text: str = ""
 # --------------------------------------------------------------------------- #
 # AuthToken persistence tests                                                  #
 # --------------------------------------------------------------------------- #
+
 
 class TestLoadAuth:
     def test_new_file_generates_uuid(self, config: Config) -> None:
@@ -81,20 +85,26 @@ class TestLoadAuth:
         assert auth.token == "eyJhbGciOiJIUzI1NiJ9.test"
         assert auth.permissions == "readwrite"
 
-    def test_loads_file_without_token(self, config: Config, tmp_token_file: Path) -> None:
+    def test_loads_file_without_token(
+        self, config: Config, tmp_token_file: Path
+    ) -> None:
         data = {"client_id": "no-token-uuid"}
         tmp_token_file.write_text(json.dumps(data))
         auth = load_auth(config)
         assert auth.client_id == "no-token-uuid"
         assert auth.token is None
 
-    def test_corrupt_file_generates_new_uuid(self, config: Config, tmp_token_file: Path) -> None:
+    def test_corrupt_file_generates_new_uuid(
+        self, config: Config, tmp_token_file: Path
+    ) -> None:
         tmp_token_file.write_text("not valid json{{{")
         auth = load_auth(config)
         assert auth.client_id  # new UUID generated
         assert auth.token is None
 
-    def test_missing_client_id_generates_new(self, config: Config, tmp_token_file: Path) -> None:
+    def test_missing_client_id_generates_new(
+        self, config: Config, tmp_token_file: Path
+    ) -> None:
         tmp_token_file.write_text(json.dumps({"token": "abc"}))
         auth = load_auth(config)
         assert auth.client_id  # new UUID
@@ -103,6 +113,7 @@ class TestLoadAuth:
     def test_consistent_uuid_format(self, config: Config) -> None:
         """Generated client_id should be a valid UUID v4."""
         import uuid
+
         auth = load_auth(config)
         parsed = uuid.UUID(auth.client_id)
         assert parsed.version == 4
@@ -149,6 +160,7 @@ class TestSaveAuth:
 # --------------------------------------------------------------------------- #
 # Token validation tests                                                       #
 # --------------------------------------------------------------------------- #
+
 
 class TestValidateToken:
     @pytest.mark.asyncio
@@ -221,26 +233,33 @@ class TestValidateToken:
 # Device access request tests                                                  #
 # --------------------------------------------------------------------------- #
 
+
 class TestRequestDeviceAccess:
     @pytest.mark.asyncio
     async def test_successful_request_and_approval(self, config: Config) -> None:
         auth = AuthToken(client_id="test-device-uuid")
 
         # POST response: request accepted, pending
-        post_resp = _mock_response(202, {
-            "state": "PENDING",
-            "href": "/signalk/v1/access/requests/req-123",
-        })
+        post_resp = _mock_response(
+            202,
+            {
+                "state": "PENDING",
+                "href": "/signalk/v1/access/requests/req-123",
+            },
+        )
 
         # Poll response: approved with token
-        poll_resp = _mock_response(200, {
-            "state": "COMPLETED",
-            "statusCode": 200,
-            "accessRequest": {
-                "permission": "APPROVED",
-                "token": "eyJhbGciOiJIUzI1NiJ9.approved",
+        poll_resp = _mock_response(
+            200,
+            {
+                "state": "COMPLETED",
+                "statusCode": 200,
+                "accessRequest": {
+                    "permission": "APPROVED",
+                    "token": "eyJhbGciOiJIUzI1NiJ9.approved",
+                },
             },
-        })
+        )
 
         with patch("signalk_auth.httpx.AsyncClient") as MockClient:
             mock_ctx = AsyncMock()
@@ -249,8 +268,10 @@ class TestRequestDeviceAccess:
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            with patch("signalk_auth._poll_access_request",
-                       return_value="eyJhbGciOiJIUzI1NiJ9.approved") as mock_poll:
+            with patch(
+                "signalk_auth._poll_access_request",
+                return_value="eyJhbGciOiJIUzI1NiJ9.approved",
+            ):
                 token = await request_device_access(config, auth)
                 assert token == "eyJhbGciOiJIUzI1NiJ9.approved"
                 # Verify POST body contained correct fields
@@ -306,14 +327,18 @@ class TestRequestDeviceAccess:
 # Poll access request tests                                                    #
 # --------------------------------------------------------------------------- #
 
+
 class TestPollAccessRequest:
     @pytest.mark.asyncio
     async def test_approved_on_first_poll(self) -> None:
         config = Config(auth_poll_interval_s=0.01, auth_approval_timeout_s=5.0)
-        poll_resp = _mock_response(200, {
-            "state": "COMPLETED",
-            "accessRequest": {"permission": "APPROVED", "token": "jwt-token-123"},
-        })
+        poll_resp = _mock_response(
+            200,
+            {
+                "state": "COMPLETED",
+                "accessRequest": {"permission": "APPROVED", "token": "jwt-token-123"},
+            },
+        )
 
         with patch("signalk_auth.httpx.AsyncClient") as MockClient:
             mock_ctx = AsyncMock()
@@ -329,10 +354,13 @@ class TestPollAccessRequest:
     @pytest.mark.asyncio
     async def test_denied(self) -> None:
         config = Config(auth_poll_interval_s=0.01, auth_approval_timeout_s=5.0)
-        poll_resp = _mock_response(200, {
-            "state": "COMPLETED",
-            "accessRequest": {"permission": "DENIED"},
-        })
+        poll_resp = _mock_response(
+            200,
+            {
+                "state": "COMPLETED",
+                "accessRequest": {"permission": "DENIED"},
+            },
+        )
 
         with patch("signalk_auth.httpx.AsyncClient") as MockClient:
             mock_ctx = AsyncMock()
@@ -349,10 +377,13 @@ class TestPollAccessRequest:
     async def test_pending_then_approved(self) -> None:
         config = Config(auth_poll_interval_s=0.01, auth_approval_timeout_s=5.0)
         pending_resp = _mock_response(200, {"state": "PENDING"})
-        approved_resp = _mock_response(200, {
-            "state": "COMPLETED",
-            "accessRequest": {"permission": "APPROVED", "token": "delayed-token"},
-        })
+        approved_resp = _mock_response(
+            200,
+            {
+                "state": "COMPLETED",
+                "accessRequest": {"permission": "APPROVED", "token": "delayed-token"},
+            },
+        )
 
         call_count = 0
 
@@ -376,29 +407,51 @@ class TestPollAccessRequest:
             assert call_count == 3
 
     @pytest.mark.asyncio
-    async def test_timeout(self) -> None:
+    async def test_polls_indefinitely_until_cancelled(self) -> None:
+        """_poll_access_request no longer times out on its own.
+
+        It polls forever until the caller cancels.  Verify that it keeps
+        polling and that asyncio.CancelledError propagates cleanly.
+        """
+        import asyncio
+
         config = Config(auth_poll_interval_s=0.01, auth_approval_timeout_s=0.05)
         pending_resp = _mock_response(200, {"state": "PENDING"})
+        call_count = 0
+
+        async def counting_get(*args: Any, **kwargs: Any) -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            return pending_resp
 
         with patch("signalk_auth.httpx.AsyncClient") as MockClient:
             mock_ctx = AsyncMock()
-            mock_ctx.get = AsyncMock(return_value=pending_resp)
+            mock_ctx.get = AsyncMock(side_effect=counting_get)
             MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_ctx)
             MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
 
-            token = await _poll_access_request(
-                config, "http://localhost:3000/signalk/v1/access/requests/req-4"
-            )
-            assert token is None
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    _poll_access_request(
+                        config,
+                        "http://localhost:3000/signalk/v1/access/requests/req-4",
+                    ),
+                    timeout=0.1,
+                )
+            # Should have polled multiple times before we cancelled
+            assert call_count >= 2
 
     @pytest.mark.asyncio
     async def test_poll_http_error_retries(self) -> None:
         config = Config(auth_poll_interval_s=0.01, auth_approval_timeout_s=5.0)
         error_resp = _mock_response(500)
-        approved_resp = _mock_response(200, {
-            "state": "COMPLETED",
-            "accessRequest": {"permission": "APPROVED", "token": "retry-token"},
-        })
+        approved_resp = _mock_response(
+            200,
+            {
+                "state": "COMPLETED",
+                "accessRequest": {"permission": "APPROVED", "token": "retry-token"},
+            },
+        )
 
         call_count = 0
 
@@ -423,10 +476,13 @@ class TestPollAccessRequest:
     @pytest.mark.asyncio
     async def test_poll_network_error_retries(self) -> None:
         config = Config(auth_poll_interval_s=0.01, auth_approval_timeout_s=5.0)
-        approved_resp = _mock_response(200, {
-            "state": "COMPLETED",
-            "accessRequest": {"permission": "APPROVED", "token": "net-retry-token"},
-        })
+        approved_resp = _mock_response(
+            200,
+            {
+                "state": "COMPLETED",
+                "accessRequest": {"permission": "APPROVED", "token": "net-retry-token"},
+            },
+        )
 
         call_count = 0
 
@@ -453,11 +509,18 @@ class TestPollAccessRequest:
 # Full ensure_auth_token flow tests                                            #
 # --------------------------------------------------------------------------- #
 
+
 class TestEnsureAuthToken:
     @pytest.mark.asyncio
-    async def test_existing_valid_token(self, config: Config, tmp_token_file: Path) -> None:
+    async def test_existing_valid_token(
+        self, config: Config, tmp_token_file: Path
+    ) -> None:
         """If a saved token validates, return it without requesting new access."""
-        data = {"client_id": "saved-uuid", "token": "valid-jwt", "permissions": "readwrite"}
+        data = {
+            "client_id": "saved-uuid",
+            "token": "valid-jwt",
+            "permissions": "readwrite",
+        }
         tmp_token_file.write_text(json.dumps(data))
 
         with patch("signalk_auth.validate_token", return_value=True):
@@ -467,13 +530,19 @@ class TestEnsureAuthToken:
             assert auth.client_id == "saved-uuid"
 
     @pytest.mark.asyncio
-    async def test_invalid_token_requests_new(self, config: Config, tmp_token_file: Path) -> None:
+    async def test_invalid_token_requests_new(
+        self, config: Config, tmp_token_file: Path
+    ) -> None:
         """If saved token is invalid, request new device access."""
         data = {"client_id": "saved-uuid", "token": "expired-jwt"}
         tmp_token_file.write_text(json.dumps(data))
 
-        with patch("signalk_auth.validate_token", return_value=False), \
-             patch("signalk_auth.request_device_access", return_value="new-jwt") as mock_req:
+        with (
+            patch("signalk_auth.validate_token", return_value=False),
+            patch(
+                "signalk_auth.request_device_access", return_value="new-jwt"
+            ) as mock_req,
+        ):
             auth = await ensure_auth_token(config)
             assert auth is not None
             assert auth.token == "new-jwt"
@@ -486,7 +555,9 @@ class TestEnsureAuthToken:
     @pytest.mark.asyncio
     async def test_no_saved_token_requests_new(self, config: Config) -> None:
         """If no saved token exists, request device access."""
-        with patch("signalk_auth.request_device_access", return_value="fresh-jwt") as mock_req:
+        with patch(
+            "signalk_auth.request_device_access", return_value="fresh-jwt"
+        ) as mock_req:
             auth = await ensure_auth_token(config)
             assert auth is not None
             assert auth.token == "fresh-jwt"
@@ -507,12 +578,18 @@ class TestEnsureAuthToken:
         data = {"client_id": "persistent-uuid", "token": "old-jwt"}
         tmp_token_file.write_text(json.dumps(data))
 
-        with patch("signalk_auth.validate_token", return_value=False), \
-             patch("signalk_auth.request_device_access", return_value="new-jwt") as mock_req:
-            auth = await ensure_auth_token(config)
+        with (
+            patch("signalk_auth.validate_token", return_value=False),
+            patch(
+                "signalk_auth.request_device_access", return_value="new-jwt"
+            ) as mock_req,
+        ):
+            await ensure_auth_token(config)
             # Verify the same clientId was passed to request_device_access
             call_args = mock_req.call_args
-            passed_auth = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("auth")
+            passed_auth = (
+                call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("auth")
+            )
             if passed_auth is None:
                 passed_auth = call_args[0][1]
             assert passed_auth.client_id == "persistent-uuid"
@@ -522,9 +599,11 @@ class TestEnsureAuthToken:
 # Config auth fields tests                                                     #
 # --------------------------------------------------------------------------- #
 
+
 class TestConfigAuth:
     def test_default_auth_token_file(self) -> None:
         from pathlib import Path
+
         c = Config()
         expected = str(Path.home() / ".sea_state_analyzer" / "signalk_token.json")
         assert c.auth_token_file == expected
@@ -574,9 +653,11 @@ class TestConfigAuth:
 # SignalKClient auth token integration tests                                   #
 # --------------------------------------------------------------------------- #
 
+
 class TestSignalKClientAuth:
     def test_set_auth_token(self) -> None:
         from signalk_client import SignalKClient
+
         client = SignalKClient(Config())
         assert client._auth_token is None
         client.set_auth_token("test-jwt-token")
@@ -584,6 +665,7 @@ class TestSignalKClientAuth:
 
     def test_clear_auth_token(self) -> None:
         from signalk_client import SignalKClient
+
         client = SignalKClient(Config())
         client.set_auth_token("test-jwt")
         client.set_auth_token(None)
@@ -592,6 +674,7 @@ class TestSignalKClientAuth:
     @pytest.mark.asyncio
     async def test_send_works_with_auth_token(self) -> None:
         from signalk_client import SignalKClient
+
         client = SignalKClient(Config())
         client.set_auth_token("my-jwt")
         client._connected = True

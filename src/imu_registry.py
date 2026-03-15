@@ -9,6 +9,7 @@ Sources:
 - InvenSense / Bosch / STMicro datasheets
 - This project's own ICM-20948 driver (imu_reader.py)
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -18,6 +19,7 @@ from typing import Dict, List, Tuple
 @dataclass(frozen=True)
 class IMUChipInfo:
     """Identification parameters for a single IMU chip."""
+
     chip_name: str
     i2c_addresses: Tuple[int, ...]
     who_am_i_register: int

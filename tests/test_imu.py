@@ -2,14 +2,14 @@
 
 All tests mock smbus2.SMBus so no real I2C hardware is needed.
 """
+
 from __future__ import annotations
 
-import asyncio
 import math
 import struct
 import sys
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -20,18 +20,13 @@ from imu_reader import (
     IMUSample,
     _ICM20948Driver,
     _CHIP_ID,
-    _AK09916_CHIP_ID,
     _GRAVITY,
     _WHO_AM_I,
     _BANK_SEL,
-    _PWR_MGMT_1,
     _ACCEL_XOUT_H,
-    _GYRO_XOUT_H,
     _ACCEL_CONFIG,
     _GYRO_CONFIG_1,
     _EXT_SLV_SENS_DATA_00,
-    _AK09916_ST1,
-    _AK09916_HXL,
     _TEMP_OUT_H,
 )
 
@@ -39,6 +34,7 @@ from imu_reader import (
 # --------------------------------------------------------------------------- #
 # Fake SMBus                                                                   #
 # --------------------------------------------------------------------------- #
+
 
 class FakeSMBus:
     """Mock SMBus that simulates ICM-20948 register reads/writes."""
@@ -117,8 +113,12 @@ class FakeSMBus:
 
     def set_accel_gyro(
         self,
-        ax: int, ay: int, az: int,
-        gx: int, gy: int, gz: int,
+        ax: int,
+        ay: int,
+        az: int,
+        gx: int,
+        gy: int,
+        gz: int,
     ) -> None:
         """Set raw accel/gyro register values."""
         self._accel_gyro_data = struct.pack(">hhhhhh", ax, ay, az, gx, gy, gz)
@@ -142,6 +142,7 @@ class FakeSMBus:
 # Fixtures                                                                     #
 # --------------------------------------------------------------------------- #
 
+
 @pytest.fixture
 def fake_bus() -> FakeSMBus:
     return FakeSMBus(1)
@@ -150,8 +151,11 @@ def fake_bus() -> FakeSMBus:
 @pytest.fixture
 def driver(fake_bus: FakeSMBus) -> _ICM20948Driver:
     """Create a driver with a mocked SMBus."""
-    with patch("imu_reader.SMBus", return_value=fake_bus) if _smbus_importable() else \
-         patch.dict(sys.modules, {"smbus2": _make_fake_smbus2_module(fake_bus)}):
+    with (
+        patch("imu_reader.SMBus", return_value=fake_bus)
+        if _smbus_importable()
+        else patch.dict(sys.modules, {"smbus2": _make_fake_smbus2_module(fake_bus)})
+    ):
         d = _ICM20948Driver(bus_number=1, address=0x68)
     # Manually assign the fake bus (in case the patch didn't work due to import order)
     d._bus = fake_bus
@@ -161,7 +165,8 @@ def driver(fake_bus: FakeSMBus) -> _ICM20948Driver:
 
 def _smbus_importable() -> bool:
     try:
-        import smbus2
+        import smbus2  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -176,6 +181,7 @@ def _make_fake_smbus2_module(fake_bus: FakeSMBus) -> MagicMock:
 # --------------------------------------------------------------------------- #
 # IMUSample tests                                                              #
 # --------------------------------------------------------------------------- #
+
 
 class TestIMUSample:
     def test_accel_magnitude_at_rest(self) -> None:
@@ -372,8 +378,12 @@ class TestIMUSample:
         """Magnetometer fields default to None."""
         sample = IMUSample(
             timestamp=datetime.now(timezone.utc),
-            accel_x=0.0, accel_y=0.0, accel_z=_GRAVITY,
-            gyro_x=0.0, gyro_y=0.0, gyro_z=0.0,
+            accel_x=0.0,
+            accel_y=0.0,
+            accel_z=_GRAVITY,
+            gyro_x=0.0,
+            gyro_y=0.0,
+            gyro_z=0.0,
         )
         assert sample.mag_x is None
         assert sample.mag_y is None
@@ -383,9 +393,15 @@ class TestIMUSample:
         """Magnetometer fields can be set."""
         sample = IMUSample(
             timestamp=datetime.now(timezone.utc),
-            accel_x=0.0, accel_y=0.0, accel_z=_GRAVITY,
-            gyro_x=0.0, gyro_y=0.0, gyro_z=0.0,
-            mag_x=15.0, mag_y=30.0, mag_z=-7.5,
+            accel_x=0.0,
+            accel_y=0.0,
+            accel_z=_GRAVITY,
+            gyro_x=0.0,
+            gyro_y=0.0,
+            gyro_z=0.0,
+            mag_x=15.0,
+            mag_y=30.0,
+            mag_z=-7.5,
         )
         assert sample.mag_x == 15.0
         assert sample.mag_y == 30.0
@@ -396,8 +412,11 @@ class TestIMUSample:
 # Driver tests                                                                 #
 # --------------------------------------------------------------------------- #
 
+
 class TestICM20948Driver:
-    def test_init_reads_chip_id(self, driver: _ICM20948Driver, fake_bus: FakeSMBus) -> None:
+    def test_init_reads_chip_id(
+        self, driver: _ICM20948Driver, fake_bus: FakeSMBus
+    ) -> None:
         """init() should succeed when WHO_AM_I returns 0xEA."""
         # init() does the full setup sequence
         driver.init()
@@ -416,7 +435,9 @@ class TestICM20948Driver:
         with pytest.raises(RuntimeError, match="ICM-20948 not found"):
             d.init()
 
-    def test_read_accel_gyro_at_rest(self, driver: _ICM20948Driver, fake_bus: FakeSMBus) -> None:
+    def test_read_accel_gyro_at_rest(
+        self, driver: _ICM20948Driver, fake_bus: FakeSMBus
+    ) -> None:
         """Stationary sensor should read ~0,0,g for accel and ~0,0,0 for gyro."""
         driver.init()
 
@@ -430,7 +451,9 @@ class TestICM20948Driver:
         assert abs(gy) < 0.01
         assert abs(gz) < 0.01
 
-    def test_read_accel_known_value(self, driver: _ICM20948Driver, fake_bus: FakeSMBus) -> None:
+    def test_read_accel_known_value(
+        self, driver: _ICM20948Driver, fake_bus: FakeSMBus
+    ) -> None:
         """Test with a known acceleration value."""
         driver.init()
 
@@ -442,7 +465,9 @@ class TestICM20948Driver:
         assert abs(ax - expected_ax) < 0.1
         assert abs(az - _GRAVITY) < 0.1
 
-    def test_read_gyro_known_value(self, driver: _ICM20948Driver, fake_bus: FakeSMBus) -> None:
+    def test_read_gyro_known_value(
+        self, driver: _ICM20948Driver, fake_bus: FakeSMBus
+    ) -> None:
         """Test with a known gyro value."""
         driver.init()
 
@@ -453,7 +478,9 @@ class TestICM20948Driver:
         expected_gz = math.radians(10.0)
         assert abs(gz - expected_gz) < 0.02  # ~0.175 rad/s
 
-    def test_read_temperature(self, driver: _ICM20948Driver, fake_bus: FakeSMBus) -> None:
+    def test_read_temperature(
+        self, driver: _ICM20948Driver, fake_bus: FakeSMBus
+    ) -> None:
         """Temperature conversion from raw register value."""
         driver.init()
 
@@ -496,6 +523,7 @@ class TestICM20948Driver:
 # --------------------------------------------------------------------------- #
 # Async IMUReader tests                                                        #
 # --------------------------------------------------------------------------- #
+
 
 class TestIMUReader:
     @pytest.mark.asyncio
@@ -831,10 +859,12 @@ class TestIMUReader:
 # InstantSample IMU field tests                                                #
 # --------------------------------------------------------------------------- #
 
+
 class TestInstantSampleIMUFields:
     def test_imu_fields_default_none(self) -> None:
         """All IMU fields on InstantSample should default to None."""
         from models import InstantSample
+
         sample = InstantSample(timestamp=datetime.now(timezone.utc))
         assert sample.accel_x is None
         assert sample.accel_y is None
@@ -850,6 +880,7 @@ class TestInstantSampleIMUFields:
     def test_imu_fields_settable(self) -> None:
         """IMU fields should be settable on InstantSample."""
         from models import InstantSample
+
         sample = InstantSample(timestamp=datetime.now(timezone.utc))
         sample.accel_x = 0.1
         sample.accel_y = 0.2
@@ -872,10 +903,12 @@ class TestInstantSampleIMUFields:
 # Config IMU fields tests                                                      #
 # --------------------------------------------------------------------------- #
 
+
 class TestConfigIMUFields:
     def test_default_imu_config(self) -> None:
         """Config should have sensible IMU defaults."""
         from config import Config
+
         c = Config()
         assert c.imu_enabled is True
         assert c.imu_bus_number == 1
@@ -886,6 +919,7 @@ class TestConfigIMUFields:
     def test_imu_disabled(self) -> None:
         """IMU can be disabled via config."""
         from config import Config
+
         c = Config(imu_enabled=False)
         assert c.imu_enabled is False
 
@@ -894,10 +928,12 @@ class TestConfigIMUFields:
 # IMU merge logic tests (unit test of _merge_imu concept)                      #
 # --------------------------------------------------------------------------- #
 
+
 class TestIMUMerge:
     def test_merge_overlays_imu_onto_sample(self) -> None:
         """Merging an IMUSample onto an InstantSample should set IMU fields."""
         from models import InstantSample
+
         now = datetime.now(timezone.utc)
 
         sample = InstantSample(
@@ -943,6 +979,7 @@ class TestIMUMerge:
     def test_merge_no_imu_leaves_none(self) -> None:
         """Without IMU data, IMU fields should remain None."""
         from models import InstantSample
+
         now = datetime.now(timezone.utc)
 
         sample = InstantSample(
@@ -957,6 +994,7 @@ class TestIMUMerge:
 # --------------------------------------------------------------------------- #
 # Double-count fix tests (_imu_highrate_active)                                #
 # --------------------------------------------------------------------------- #
+
 
 class TestIMUHighrateActiveFlag:
     """Verify that the feature extractor doesn't double-count accel data.

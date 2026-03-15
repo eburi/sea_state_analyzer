@@ -19,6 +19,7 @@ connection to enable delta writes.
 See also:
     https://signalk.org/specification/1.7.0/doc/access_requests.html
 """
+
 from __future__ import annotations
 
 import json
@@ -38,6 +39,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AuthToken:
     """Persisted authentication state."""
+
     client_id: str
     token: Optional[str] = None
     permissions: Optional[str] = None
@@ -63,11 +65,16 @@ def load_auth(config: Config) -> AuthToken:
                 token=data.get("token"),
                 permissions=data.get("permissions"),
             )
-            logger.info("Loaded auth state: clientId=%s, has_token=%s",
-                        auth.client_id, auth.token is not None)
+            logger.info(
+                "Loaded auth state: clientId=%s, has_token=%s",
+                auth.client_id,
+                auth.token is not None,
+            )
             return auth
         except (json.JSONDecodeError, KeyError, TypeError) as exc:
-            logger.warning("Corrupt auth file %s: %s — generating new clientId", path, exc)
+            logger.warning(
+                "Corrupt auth file %s: %s — generating new clientId", path, exc
+            )
 
     # Generate a new clientId
     auth = AuthToken(client_id=str(uuid.uuid4()))
@@ -108,12 +115,16 @@ async def validate_token(config: Config, auth: AuthToken) -> bool:
                 logger.info("Existing token is valid")
                 return True
             elif resp.status_code in (401, 403):
-                logger.warning("Existing token rejected (HTTP %d) — will re-request",
-                               resp.status_code)
+                logger.warning(
+                    "Existing token rejected (HTTP %d) — will re-request",
+                    resp.status_code,
+                )
                 return False
             else:
-                logger.warning("Token validation got HTTP %d — treating as invalid",
-                               resp.status_code)
+                logger.warning(
+                    "Token validation got HTTP %d — treating as invalid",
+                    resp.status_code,
+                )
                 return False
     except Exception as exc:
         logger.warning("Token validation failed: %s — treating as invalid", exc)
@@ -157,7 +168,8 @@ async def request_device_access(
             if resp.status_code not in (200, 202):
                 logger.error(
                     "Device access request failed: HTTP %d — %s",
-                    resp.status_code, resp.text[:200],
+                    resp.status_code,
+                    resp.text[:200],
                 )
                 return None
 
@@ -246,7 +258,8 @@ async def _poll_access_request(
                     else:
                         logger.error(
                             "Unexpected access request result: permission=%s, has_token=%s",
-                            permission, token is not None,
+                            permission,
+                            token is not None,
                         )
                         return None
 

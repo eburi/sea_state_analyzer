@@ -2,17 +2,17 @@
 
 All tests mock smbus2 so no real I2C hardware is needed.
 """
+
 from __future__ import annotations
 
 import sys
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from imu_registry import (
     IMU_REGISTRY,
-    IMUChipInfo,
     all_scan_addresses,
     get_chip_info,
 )
@@ -30,6 +30,7 @@ from imu_detect import (
 # --------------------------------------------------------------------------- #
 # Fake SMBus for detection tests                                               #
 # --------------------------------------------------------------------------- #
+
 
 class FakeDetectBus:
     """Minimal SMBus mock that simulates devices at given addresses.
@@ -58,6 +59,7 @@ class FakeDetectBus:
 # --------------------------------------------------------------------------- #
 # Registry tests                                                               #
 # --------------------------------------------------------------------------- #
+
 
 class TestIMURegistry:
     def test_registry_not_empty(self) -> None:
@@ -120,6 +122,7 @@ class TestIMURegistry:
 # Low-level probe/read tests                                                   #
 # --------------------------------------------------------------------------- #
 
+
 class TestProbeAndRead:
     def test_probe_address_found(self) -> None:
         bus = FakeDetectBus({0x68: {}})
@@ -147,12 +150,15 @@ class TestProbeAndRead:
 # Bus scanning tests                                                           #
 # --------------------------------------------------------------------------- #
 
+
 class TestScanBus:
     def test_detect_icm20948(self) -> None:
         """Should detect ICM-20948 at 0x68."""
-        bus = FakeDetectBus({
-            0x68: {0x00: 0xEA},  # WHO_AM_I for ICM-20948
-        })
+        bus = FakeDetectBus(
+            {
+                0x68: {0x00: 0xEA},  # WHO_AM_I for ICM-20948
+            }
+        )
         result = _scan_bus(bus, bus_number=1)
         assert result is not None
         assert result.chip.chip_name == "ICM-20948"
@@ -161,9 +167,11 @@ class TestScanBus:
 
     def test_detect_icm20948_alt_address(self) -> None:
         """Should detect ICM-20948 at 0x69."""
-        bus = FakeDetectBus({
-            0x69: {0x00: 0xEA},
-        })
+        bus = FakeDetectBus(
+            {
+                0x69: {0x00: 0xEA},
+            }
+        )
         result = _scan_bus(bus, bus_number=1)
         assert result is not None
         assert result.chip.chip_name == "ICM-20948"
@@ -171,12 +179,14 @@ class TestScanBus:
 
     def test_detect_mpu6050(self) -> None:
         """Should detect MPU-6050 (WHO_AM_I at 0x75, value 0x68)."""
-        bus = FakeDetectBus({
-            0x68: {
-                0x00: 0x00,   # Not ICM-20948
-                0x75: 0x68,   # MPU-6050
-            },
-        })
+        bus = FakeDetectBus(
+            {
+                0x68: {
+                    0x00: 0x00,  # Not ICM-20948
+                    0x75: 0x68,  # MPU-6050
+                },
+            }
+        )
         result = _scan_bus(bus, bus_number=1)
         assert result is not None
         assert result.chip.chip_name == "MPU-6050"
@@ -184,21 +194,25 @@ class TestScanBus:
 
     def test_detect_mpu9250(self) -> None:
         """Should detect MPU-9250 (WHO_AM_I at 0x75, value 0x71)."""
-        bus = FakeDetectBus({
-            0x68: {
-                0x00: 0x00,
-                0x75: 0x71,
-            },
-        })
+        bus = FakeDetectBus(
+            {
+                0x68: {
+                    0x00: 0x00,
+                    0x75: 0x71,
+                },
+            }
+        )
         result = _scan_bus(bus, bus_number=1)
         assert result is not None
         assert result.chip.chip_name == "MPU-9250"
 
     def test_detect_bno055(self) -> None:
         """Should detect BNO055 at 0x28."""
-        bus = FakeDetectBus({
-            0x28: {0x00: 0xA0},
-        })
+        bus = FakeDetectBus(
+            {
+                0x28: {0x00: 0xA0},
+            }
+        )
         result = _scan_bus(bus, bus_number=1)
         assert result is not None
         assert result.chip.chip_name == "BNO055"
@@ -206,9 +220,11 @@ class TestScanBus:
 
     def test_detect_lsm6dsox(self) -> None:
         """Should detect LSM6DSOX at 0x6A."""
-        bus = FakeDetectBus({
-            0x6A: {0x0F: 0x6C},
-        })
+        bus = FakeDetectBus(
+            {
+                0x6A: {0x0F: 0x6C},
+            }
+        )
         result = _scan_bus(bus, bus_number=1)
         assert result is not None
         assert result.chip.chip_name == "LSM6DSOX"
@@ -216,12 +232,14 @@ class TestScanBus:
 
     def test_detect_bmi160(self) -> None:
         """Should detect BMI160 at 0x68."""
-        bus = FakeDetectBus({
-            0x68: {
-                0x00: 0xD1,   # BMI160
-                0x75: 0x00,   # Not MPU
-            },
-        })
+        bus = FakeDetectBus(
+            {
+                0x68: {
+                    0x00: 0xD1,  # BMI160
+                    0x75: 0x00,  # Not MPU
+                },
+            }
+        )
         result = _scan_bus(bus, bus_number=1)
         assert result is not None
         assert result.chip.chip_name == "BMI160"
@@ -234,19 +252,23 @@ class TestScanBus:
 
     def test_unknown_device_returns_none(self) -> None:
         """Device with unrecognised WHO_AM_I should return None."""
-        bus = FakeDetectBus({
-            0x68: {0x00: 0xFF, 0x75: 0xFF},
-        })
+        bus = FakeDetectBus(
+            {
+                0x68: {0x00: 0xFF, 0x75: 0xFF},
+            }
+        )
         result = _scan_bus(bus, bus_number=1)
         assert result is None
 
     def test_multiple_devices_returns_first(self) -> None:
         """When multiple IMUs are present, returns the first found
         (lowest address in scan order)."""
-        bus = FakeDetectBus({
-            0x28: {0x00: 0xA0},       # BNO055
-            0x68: {0x00: 0xEA},       # ICM-20948
-        })
+        bus = FakeDetectBus(
+            {
+                0x28: {0x00: 0xA0},  # BNO055
+                0x68: {0x00: 0xEA},  # ICM-20948
+            }
+        )
         result = _scan_bus(bus, bus_number=1)
         assert result is not None
         # 0x28 is scanned before 0x68
@@ -254,9 +276,11 @@ class TestScanBus:
 
     def test_icm20649_distinguished_from_icm20948(self) -> None:
         """ICM-20649 (0xE1) vs ICM-20948 (0xEA) at same register."""
-        bus = FakeDetectBus({
-            0x68: {0x00: 0xE1},
-        })
+        bus = FakeDetectBus(
+            {
+                0x68: {0x00: 0xE1},
+            }
+        )
         result = _scan_bus(bus, bus_number=1)
         assert result is not None
         assert result.chip.chip_name == "ICM-20649"
@@ -265,6 +289,7 @@ class TestScanBus:
 # --------------------------------------------------------------------------- #
 # High-level detect_imu tests                                                  #
 # --------------------------------------------------------------------------- #
+
 
 class TestDetectIMU:
     def test_detect_imu_no_smbus(self) -> None:
@@ -335,6 +360,7 @@ class TestDetectIMU:
 # discover_i2c_buses tests                                                     #
 # --------------------------------------------------------------------------- #
 
+
 class TestDiscoverI2CBuses:
     def test_discovers_standard_buses(self) -> None:
         """Should parse /dev/i2c-N entries correctly."""
@@ -376,6 +402,7 @@ class TestDiscoverI2CBuses:
 # DetectionResult tests                                                        #
 # --------------------------------------------------------------------------- #
 
+
 class TestDetectionResult:
     def test_str_representation(self) -> None:
         chip = get_chip_info("ICM-20948")
@@ -397,13 +424,16 @@ class TestDetectionResult:
 # Config integration tests                                                     #
 # --------------------------------------------------------------------------- #
 
+
 class TestConfigAutoDetect:
     def test_default_auto_detect_enabled(self) -> None:
         from config import Config
+
         c = Config()
         assert c.imu_auto_detect is True
 
     def test_auto_detect_disableable(self) -> None:
         from config import Config
+
         c = Config(imu_auto_detect=False)
         assert c.imu_auto_detect is False

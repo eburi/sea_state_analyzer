@@ -7,6 +7,7 @@ SignalKValueUpdate objects into an asyncio queue.
 Reconnection uses exponential back-off as configured.  The client never
 raises from its main run-loop; errors are logged and retried.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -17,7 +18,6 @@ from typing import Any, Dict, Optional
 
 import httpx
 import websockets
-from websockets.exceptions import ConnectionClosed
 
 from config import Config, DEFAULT_CONFIG
 from models import RawDeltaMessage, SignalKValueUpdate
@@ -242,9 +242,7 @@ class SignalKClient:
             # ---- subscribe -------------------------------------------- #
             sub_msg = _build_subscription_message(self._self_context)
             await ws.send(sub_msg)
-            logger.info(
-                "Subscribed to %d self paths", len(SUBSCRIPTION_PATHS)
-            )
+            logger.info("Subscribed to %d self paths", len(SUBSCRIPTION_PATHS))
 
             self._connected = True
 
@@ -252,9 +250,7 @@ class SignalKClient:
             async for raw_msg in ws:
                 await self._handle_message(raw_msg, queue)
 
-    async def _handle_message(
-        self, raw_msg: str, queue: asyncio.Queue
-    ) -> None:
+    async def _handle_message(self, raw_msg: str, queue: asyncio.Queue) -> None:
         received_at = _now_utc()
         try:
             msg = json.loads(raw_msg)
@@ -274,7 +270,7 @@ class SignalKClient:
         if not updates:
             return
 
-        raw_delta = RawDeltaMessage(
+        RawDeltaMessage(
             received_at=received_at,
             context=context,
             updates=updates,
@@ -339,6 +335,7 @@ class SignalKClient:
 # Inspect mode: observe all self paths                                         #
 # --------------------------------------------------------------------------- #
 
+
 class InspectClient(SignalKClient):
     """
     Variant of SignalKClient for path inspection.  Subscribes to all paths
@@ -378,6 +375,7 @@ class InspectClient(SignalKClient):
 # --------------------------------------------------------------------------- #
 # Helpers                                                                      #
 # --------------------------------------------------------------------------- #
+
 
 def _extract_source_label(update_block: Dict[str, Any]) -> Optional[str]:
     """Best-effort extraction of source label from an update block."""

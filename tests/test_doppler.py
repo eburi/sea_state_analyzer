@@ -1,11 +1,11 @@
 """Tests for Doppler correction, new sensor fields, and validation guards."""
+
 from __future__ import annotations
 
 import math
 import sys
 import os
 import pytest
-import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "src"))
 
@@ -35,6 +35,7 @@ from datetime import datetime, timezone, timedelta
 # Helpers                                                                      #
 # --------------------------------------------------------------------------- #
 
+
 def _ts(offset_s: float = 0.0) -> datetime:
     return datetime(2024, 1, 1, tzinfo=timezone.utc) + timedelta(seconds=offset_s)
 
@@ -43,8 +44,11 @@ def _make_update(path: str, value, received_at=None) -> SignalKValueUpdate:
     if received_at is None:
         received_at = datetime.now(timezone.utc)
     return SignalKValueUpdate(
-        path=path, value=value, source="test",
-        timestamp=received_at, received_at=received_at,
+        path=path,
+        value=value,
+        source="test",
+        timestamp=received_at,
+        received_at=received_at,
     )
 
 
@@ -63,10 +67,16 @@ def _sample(
 ) -> InstantSample:
     return InstantSample(
         timestamp=_ts(t),
-        roll=roll, pitch=pitch, yaw=yaw,
-        sog=sog, heading=heading, cog=cog,
-        stw=stw, wind_angle_true=wind_angle_true,
-        rudder_angle=rudder_angle, depth=depth,
+        roll=roll,
+        pitch=pitch,
+        yaw=yaw,
+        sog=sog,
+        heading=heading,
+        cog=cog,
+        stw=stw,
+        wind_angle_true=wind_angle_true,
+        rudder_angle=rudder_angle,
+        depth=depth,
     )
 
 
@@ -74,8 +84,8 @@ def _sample(
 # A. doppler_correct() – pure math                                            #
 # =========================================================================== #
 
-class TestDopplerCorrectMath:
 
+class TestDopplerCorrectMath:
     def test_zero_delta_v_passthrough(self):
         """With delta_v ≈ 0, true period == encounter period."""
         enc_freq = 0.1  # 10 s encounter period
@@ -93,7 +103,7 @@ class TestDopplerCorrectMath:
     def test_head_seas_longer_true_period(self):
         """Head seas (delta_v > 0): true period should be longer than encounter."""
         enc_freq = 0.15  # 6.67 s encounter period
-        delta_v = 3.0    # 3 m/s head seas
+        delta_v = 3.0  # 3 m/s head seas
         result = doppler_correct(enc_freq, delta_v)
         assert result is not None
         T, L, c = result
@@ -102,8 +112,8 @@ class TestDopplerCorrectMath:
 
     def test_following_seas_shorter_true_period(self):
         """Following seas (delta_v < 0): true period should be shorter than encounter."""
-        enc_freq = 0.1   # 10 s encounter period
-        delta_v = -2.0   # 2 m/s following seas
+        enc_freq = 0.1  # 10 s encounter period
+        delta_v = -2.0  # 2 m/s following seas
         result = doppler_correct(enc_freq, delta_v)
         assert result is not None
         T, L, c = result
@@ -118,8 +128,9 @@ class TestDopplerCorrectMath:
                 if result is not None:
                     T, L, c = result
                     expected_L = _GRAVITY * T**2 / (2 * math.pi)
-                    assert L == pytest.approx(expected_L, rel=1e-6), \
+                    assert L == pytest.approx(expected_L, rel=1e-6), (
                         f"L mismatch at enc_freq={enc_freq}, delta_v={delta_v}"
+                    )
 
     def test_phase_speed_consistency(self):
         """Verify c = L/T = g*T/(2π) for all returned results."""
@@ -179,8 +190,8 @@ class TestDopplerCorrectMath:
 # B. compute_delta_v() and classify_wave_heading()                             #
 # =========================================================================== #
 
-class TestComputeDeltaV:
 
+class TestComputeDeltaV:
     def test_head_wind_positive_delta_v(self):
         """Wind angle 0 (headwind) → delta_v = STW * cos(0) = STW."""
         dv = compute_delta_v(stw=3.0, wind_angle_true=0.0)
@@ -216,15 +227,14 @@ class TestComputeDeltaV:
 
 
 class TestClassifyWaveHeading:
-
     def test_head(self):
-        assert classify_wave_heading(3.0, 3.0) == "head"       # ratio=1.0
+        assert classify_wave_heading(3.0, 3.0) == "head"  # ratio=1.0
 
     def test_following(self):
         assert classify_wave_heading(-3.0, 3.0) == "following"  # ratio=-1.0
 
     def test_beam(self):
-        assert classify_wave_heading(0.0, 3.0) == "beam"       # ratio=0.0
+        assert classify_wave_heading(0.0, 3.0) == "beam"  # ratio=0.0
 
     def test_quartering_head(self):
         assert classify_wave_heading(1.5, 3.0) == "quartering_head"  # ratio=0.5
@@ -246,8 +256,8 @@ class TestClassifyWaveHeading:
 # C. State store: new fields                                                   #
 # =========================================================================== #
 
-class TestStateStoreNewFields:
 
+class TestStateStoreNewFields:
     def test_stw_populated(self):
         store = SelfStateStore(Config())
         store.apply_update_sync(_make_update(SPEED_THROUGH_WATER, 2.5))
@@ -305,6 +315,7 @@ class TestStateStoreNewFields:
 # D. WindowFeatures: new rolling stats                                         #
 # =========================================================================== #
 
+
 def _make_samples_with_extras(
     n: int,
     fs: float = 2.0,
@@ -319,21 +330,25 @@ def _make_samples_with_extras(
     samples = []
     for i in range(n):
         t = i * dt
-        samples.append(InstantSample(
-            timestamp=_ts(t),
-            roll=roll_fn(t) if roll_fn else 0.01 * math.sin(0.6 * t),
-            pitch=pitch_fn(t) if pitch_fn else 0.005 * math.sin(0.5 * t),
-            yaw=0.0, sog=3.0, heading=1.0, cog=1.0,
-            stw=stw,
-            wind_angle_true=wind_angle_true,
-            rudder_angle=rudder_angle,
-            depth=depth,
-        ))
+        samples.append(
+            InstantSample(
+                timestamp=_ts(t),
+                roll=roll_fn(t) if roll_fn else 0.01 * math.sin(0.6 * t),
+                pitch=pitch_fn(t) if pitch_fn else 0.005 * math.sin(0.5 * t),
+                yaw=0.0,
+                sog=3.0,
+                heading=1.0,
+                cog=1.0,
+                stw=stw,
+                wind_angle_true=wind_angle_true,
+                rudder_angle=rudder_angle,
+                depth=depth,
+            )
+        )
     return samples
 
 
 class TestWindowFeaturesNewStats:
-
     def test_stw_stats_computed(self):
         fs = 2.0
         config = Config(sample_rate_hz=fs, rolling_windows_s=[30])
@@ -382,6 +397,7 @@ class TestWindowFeaturesNewStats:
 # E. End-to-end Doppler correction in MotionEstimate                          #
 # =========================================================================== #
 
+
 def _make_doppler_samples(
     n: int,
     fs: float = 2.0,
@@ -397,22 +413,26 @@ def _make_doppler_samples(
     samples = []
     for i in range(n):
         t = i * dt
-        samples.append(InstantSample(
-            timestamp=_ts(t),
-            roll=roll_amp * math.sin(2 * math.pi * roll_freq * t),
-            pitch=0.03 * math.sin(2 * math.pi * 0.08 * t),
-            yaw=0.0, sog=3.0, heading=1.0, cog=1.0,
-            rate_of_turn=0.0,
-            stw=stw,
-            wind_angle_true=wind_angle_true,
-            rudder_angle=rudder_angle,
-            depth=depth,
-        ))
+        samples.append(
+            InstantSample(
+                timestamp=_ts(t),
+                roll=roll_amp * math.sin(2 * math.pi * roll_freq * t),
+                pitch=0.03 * math.sin(2 * math.pi * 0.08 * t),
+                yaw=0.0,
+                sog=3.0,
+                heading=1.0,
+                cog=1.0,
+                rate_of_turn=0.0,
+                stw=stw,
+                wind_angle_true=wind_angle_true,
+                rudder_angle=rudder_angle,
+                depth=depth,
+            )
+        )
     return samples
 
 
 class TestEndToEndDoppler:
-
     def test_doppler_correction_produces_results(self):
         """With STW and wind angle data, MotionEstimate should have Doppler fields."""
         fs = 2.0
@@ -424,9 +444,12 @@ class TestEndToEndDoppler:
         fe = FeatureExtractor(config)
 
         samples = _make_doppler_samples(
-            int(120 * fs), fs=fs,
-            roll_freq=0.1, roll_amp=0.15,
-            stw=3.0, wind_angle_true=0.3,  # ~17 deg off bow, mostly head seas
+            int(120 * fs),
+            fs=fs,
+            roll_freq=0.1,
+            roll_amp=0.15,
+            stw=3.0,
+            wind_angle_true=0.3,  # ~17 deg off bow, mostly head seas
             depth=200.0,  # deep enough for resulting wavelength (~217m → L/2 ≈ 108m)
         )
         for s in samples:
@@ -456,9 +479,12 @@ class TestEndToEndDoppler:
         fe = FeatureExtractor(config)
 
         samples = _make_doppler_samples(
-            int(120 * fs), fs=fs,
-            roll_freq=0.1, roll_amp=0.20,
-            stw=4.0, wind_angle_true=0.0,  # dead upwind → max head seas
+            int(120 * fs),
+            fs=fs,
+            roll_freq=0.1,
+            roll_amp=0.20,
+            stw=4.0,
+            wind_angle_true=0.0,  # dead upwind → max head seas
             depth=200.0,
         )
         for s in samples:
@@ -481,8 +507,10 @@ class TestEndToEndDoppler:
         fe = FeatureExtractor(config)
 
         samples = _make_doppler_samples(
-            int(120 * fs), fs=fs,
-            roll_freq=0.1, roll_amp=0.15,
+            int(120 * fs),
+            fs=fs,
+            roll_freq=0.1,
+            roll_amp=0.15,
             stw=None,  # No STW
             wind_angle_true=0.3,
         )
@@ -505,8 +533,10 @@ class TestEndToEndDoppler:
         fe = FeatureExtractor(config)
 
         samples = _make_doppler_samples(
-            int(120 * fs), fs=fs,
-            roll_freq=0.1, roll_amp=0.15,
+            int(120 * fs),
+            fs=fs,
+            roll_freq=0.1,
+            roll_amp=0.15,
             stw=3.0,
             wind_angle_true=None,  # No wind angle
         )
@@ -524,8 +554,8 @@ class TestEndToEndDoppler:
 # F. Validation guards                                                         #
 # =========================================================================== #
 
-class TestValidationGuards:
 
+class TestValidationGuards:
     def test_manoeuvre_suppresses_doppler(self):
         """Large rudder angle variation should suppress Doppler correction."""
         fs = 2.0
@@ -542,18 +572,23 @@ class TestValidationGuards:
         samples = []
         for i in range(n):
             t = i * dt
-            samples.append(InstantSample(
-                timestamp=_ts(t),
-                roll=0.15 * math.sin(2 * math.pi * 0.1 * t),
-                pitch=0.03 * math.sin(2 * math.pi * 0.08 * t),
-                yaw=0.0, sog=3.0, heading=1.0, cog=1.0,
-                rate_of_turn=0.0,
-                stw=3.0,
-                wind_angle_true=0.3,
-                # Large rudder oscillation → std >> 0.10 rad
-                rudder_angle=0.30 * math.sin(2 * math.pi * 0.05 * t),
-                depth=100.0,
-            ))
+            samples.append(
+                InstantSample(
+                    timestamp=_ts(t),
+                    roll=0.15 * math.sin(2 * math.pi * 0.1 * t),
+                    pitch=0.03 * math.sin(2 * math.pi * 0.08 * t),
+                    yaw=0.0,
+                    sog=3.0,
+                    heading=1.0,
+                    cog=1.0,
+                    rate_of_turn=0.0,
+                    stw=3.0,
+                    wind_angle_true=0.3,
+                    # Large rudder oscillation → std >> 0.10 rad
+                    rudder_angle=0.30 * math.sin(2 * math.pi * 0.05 * t),
+                    depth=100.0,
+                )
+            )
         for s in samples:
             fe.add_sample(s)
 
@@ -575,8 +610,10 @@ class TestValidationGuards:
         fe = FeatureExtractor(config)
 
         samples = _make_doppler_samples(
-            int(120 * fs), fs=fs,
-            roll_freq=0.1, roll_amp=0.15,
+            int(120 * fs),
+            fs=fs,
+            roll_freq=0.1,
+            roll_amp=0.15,
             stw=0.3,  # Below min threshold
             wind_angle_true=0.3,
             depth=100.0,
@@ -600,8 +637,10 @@ class TestValidationGuards:
         fe = FeatureExtractor(config)
 
         samples = _make_doppler_samples(
-            int(120 * fs), fs=fs,
-            roll_freq=0.1, roll_amp=0.15,
+            int(120 * fs),
+            fs=fs,
+            roll_freq=0.1,
+            roll_amp=0.15,
             stw=3.0,
             wind_angle_true=0.3,
             depth=3.0,  # Very shallow — 3m < wavelength/2 for any ocean wave
@@ -630,11 +669,14 @@ class TestValidationGuards:
         fe = FeatureExtractor(config)
 
         samples = _make_doppler_samples(
-            int(120 * fs), fs=fs,
-            roll_freq=0.1, roll_amp=0.15,
-            stw=3.0, wind_angle_true=0.3,
+            int(120 * fs),
+            fs=fs,
+            roll_freq=0.1,
+            roll_amp=0.15,
+            stw=3.0,
+            wind_angle_true=0.3,
             rudder_angle=0.01,  # Steady rudder
-            depth=200.0,        # Deep water
+            depth=200.0,  # Deep water
         )
         for s in samples:
             fe.add_sample(s)
@@ -656,9 +698,12 @@ class TestValidationGuards:
         fe = FeatureExtractor(config)
 
         samples = _make_doppler_samples(
-            int(120 * fs), fs=fs,
-            roll_freq=0.1, roll_amp=0.15,
-            stw=3.0, wind_angle_true=0.3,
+            int(120 * fs),
+            fs=fs,
+            roll_freq=0.1,
+            roll_amp=0.15,
+            stw=3.0,
+            wind_angle_true=0.3,
             rudder_angle=0.05,  # Steady, small angle → std ≈ 0
             depth=200.0,
         )
@@ -682,9 +727,12 @@ class TestValidationGuards:
         fe = FeatureExtractor(config)
 
         samples = _make_doppler_samples(
-            int(120 * fs), fs=fs,
-            roll_freq=0.1, roll_amp=0.15,
-            stw=3.0, wind_angle_true=0.3,
+            int(120 * fs),
+            fs=fs,
+            roll_freq=0.1,
+            roll_amp=0.15,
+            stw=3.0,
+            wind_angle_true=0.3,
             rudder_angle=0.01,
             depth=None,  # No depth sensor
         )

@@ -30,6 +30,7 @@ References
     from Measured Acceleration", Marine Engineering Frontiers, Vol 2, 2014.
 [2] bareboat-necessities math reference (see URL above).
 """
+
 from __future__ import annotations
 
 import logging
@@ -53,16 +54,20 @@ GRAVITY = 9.80665  # m/s^2
 # Trochoidal wave height estimation                                            #
 # --------------------------------------------------------------------------- #
 
+
 @dataclass
 class TrochoidalEstimate:
     """Result of trochoidal wave height estimation."""
-    significant_height: float   # metres (Hs ~ 4 * std(heave) ~ 2 * amplitude for regular waves)
-    wave_amplitude: float       # metres (H in trochoidal model -- half crest-to-trough)
-    wavelength: float           # metres (L)
-    wave_speed: float           # m/s (phase velocity, deep-water)
-    b_parameter: float          # metres (rotation centre depth, always <= 0)
-    accel_max: float            # m/s^2 (peak upward accel used)
-    frequency_hz: float         # Hz (frequency used for computation)
+
+    significant_height: (
+        float  # metres (Hs ~ 4 * std(heave) ~ 2 * amplitude for regular waves)
+    )
+    wave_amplitude: float  # metres (H in trochoidal model -- half crest-to-trough)
+    wavelength: float  # metres (L)
+    wave_speed: float  # m/s (phase velocity, deep-water)
+    b_parameter: float  # metres (rotation centre depth, always <= 0)
+    accel_max: float  # m/s^2 (peak upward accel used)
+    frequency_hz: float  # Hz (frequency used for computation)
     method: str = "trochoidal"
 
 
@@ -135,15 +140,15 @@ def trochoidal_wave_height(
             logger.debug(
                 "trochoidal Doppler infeasible (discriminant=%.1f, "
                 "delta_v=%.2f, f=%.3f Hz); falling back to no-Doppler",
-                discriminant, delta_v, f_o,
+                discriminant,
+                delta_v,
+                f_o,
             )
             wavelength = g / (2.0 * math.pi * f_o * f_o)
         else:
             sign_dv = 1.0 if delta_v >= 0 else -1.0
             wavelength = (
-                sign_dv * math.sqrt(discriminant)
-                + 4.0 * math.pi * f_o * delta_v
-                + g
+                sign_dv * math.sqrt(discriminant) + 4.0 * math.pi * f_o * delta_v + g
             ) / (4.0 * math.pi * f_o * f_o)
             doppler_applied = True
 
@@ -204,7 +209,11 @@ def trochoidal_wave_height(
     # We report 2*amplitude as a simple estimate.
     significant_height = 2.0 * amplitude
 
-    method = "trochoidal" if (doppler_applied or abs(delta_v) < 0.05) else "trochoidal_no_doppler"
+    method = (
+        "trochoidal"
+        if (doppler_applied or abs(delta_v) < 0.05)
+        else "trochoidal_no_doppler"
+    )
     return TrochoidalEstimate(
         significant_height=significant_height,
         wave_amplitude=amplitude,
@@ -221,25 +230,28 @@ def trochoidal_wave_height(
 # Kalman filter heave estimator                                                #
 # --------------------------------------------------------------------------- #
 
+
 @dataclass
 class HeaveState:
     """Current Kalman filter state for heave estimation."""
-    displacement: float       # metres (current heave displacement)
-    velocity: float           # m/s (current vertical velocity)
+
+    displacement: float  # metres (current heave displacement)
+    velocity: float  # m/s (current vertical velocity)
     displacement_integral: float  # m*s (third integral -- should stay near 0)
 
 
 @dataclass
 class HeaveEstimate:
     """Result from the Kalman heave estimator over a window."""
-    heave_displacement: float     # metres (current heave)
-    heave_amplitude: float        # metres (half peak-to-peak over window)
-    significant_height: float     # metres (4 * std of heave over window)
-    heave_std: float              # metres (standard deviation of heave)
-    heave_max: float              # metres (max displacement in window)
-    heave_min: float              # metres (min displacement in window)
-    n_samples: int                # number of accel samples processed
-    converged: bool               # whether the filter has likely converged
+
+    heave_displacement: float  # metres (current heave)
+    heave_amplitude: float  # metres (half peak-to-peak over window)
+    significant_height: float  # metres (4 * std of heave over window)
+    heave_std: float  # metres (standard deviation of heave)
+    heave_max: float  # metres (max displacement in window)
+    heave_min: float  # metres (min displacement in window)
+    n_samples: int  # number of accel samples processed
+    converged: bool  # whether the filter has likely converged
     method: str = "kalman"
 
 
@@ -274,7 +286,7 @@ class KalmanHeaveEstimator:
 
     def __init__(
         self,
-        dt: float = 0.02,   # 50 Hz default
+        dt: float = 0.02,  # 50 Hz default
         pos_integral_trans_var: float = 1e-6,
         pos_trans_var: float = 1e-4,
         vel_trans_var: float = 1e-2,
@@ -289,28 +301,34 @@ class KalmanHeaveEstimator:
         dt3 = dt2 * dt
 
         # State transition matrix F
-        self._F = np.array([
-            [1.0, dt,  0.5 * dt2],
-            [0.0, 1.0, dt],
-            [0.0, 0.0, 1.0],
-        ])
+        self._F = np.array(
+            [
+                [1.0, dt, 0.5 * dt2],
+                [0.0, 1.0, dt],
+                [0.0, 0.0, 1.0],
+            ]
+        )
 
         # Transition offset vector B (multiplied by accel input)
-        self._B = np.array([
-            dt3 / 6.0,
-            0.5 * dt2,
-            dt,
-        ])
+        self._B = np.array(
+            [
+                dt3 / 6.0,
+                0.5 * dt2,
+                dt,
+            ]
+        )
 
         # Observation matrix H: we observe displacement_integral (index 0)
         self._H = np.array([[1.0, 0.0, 0.0]])
 
         # Process noise Q
-        self._Q = np.diag([
-            pos_integral_trans_var,
-            pos_trans_var,
-            vel_trans_var,
-        ])
+        self._Q = np.diag(
+            [
+                pos_integral_trans_var,
+                pos_trans_var,
+                vel_trans_var,
+            ]
+        )
 
         # Observation noise R
         self._R = np.array([[pos_integral_obs_var]])
@@ -372,8 +390,8 @@ class KalmanHeaveEstimator:
         K = P_pred @ self._H.T @ np.linalg.inv(S)  # Kalman gain
 
         self._x = x_pred + (K @ y).flatten()
-        I = np.eye(3)
-        self._P = (I - K @ self._H) @ P_pred
+        eye3 = np.eye(3)
+        self._P = (eye3 - K @ self._H) @ P_pred
 
         displacement = float(self._x[1])
         self._heave_history.append(displacement)
@@ -440,6 +458,7 @@ class KalmanHeaveEstimator:
 # Butterworth low-pass filter for acceleration pre-processing                  #
 # --------------------------------------------------------------------------- #
 
+
 def butterworth_lowpass(
     data: np.ndarray,
     cutoff_hz: float,
@@ -469,13 +488,14 @@ def butterworth_lowpass(
     if len(data) < 3 * order:
         return data  # Too few samples
 
-    sos = scipy_signal.butter(order, cutoff_hz / nyq, btype='low', output='sos')
+    sos = scipy_signal.butter(order, cutoff_hz / nyq, btype="low", output="sos")
     return scipy_signal.sosfiltfilt(sos, data)
 
 
 # --------------------------------------------------------------------------- #
 # Hull resonance suppression for PSD peak detection                            #
 # --------------------------------------------------------------------------- #
+
 
 def _hull_resonance_suppression(
     freqs: np.ndarray,
@@ -524,7 +544,10 @@ def _hull_resonance_suppression(
         resonance_freqs.append(1.0 / hull_params.resonant_period)
 
     # Beam resonance
-    if hull_params.beam_resonant_period is not None and hull_params.beam_resonant_period > 0:
+    if (
+        hull_params.beam_resonant_period is not None
+        and hull_params.beam_resonant_period > 0
+    ):
         resonance_freqs.append(1.0 / hull_params.beam_resonant_period)
 
     # Natural roll/pitch period range — suppress the entire band
@@ -619,9 +642,11 @@ def _spectral_hs_from_displacement_psd(
 # Combined wave estimator: runs both methods on a window of accel data         #
 # --------------------------------------------------------------------------- #
 
+
 @dataclass
 class WaveEstimate:
     """Combined wave height estimate from trochoidal + Kalman methods."""
+
     # Trochoidal method result (may be None)
     trochoidal: Optional[TrochoidalEstimate] = None
     # Kalman method result (may be None)
@@ -711,7 +736,7 @@ def _extract_wave_partitions(
     bounds: List[Tuple[int, int]] = []
     start = 0
     for left_peak, right_peak in zip(peak_idx[:-1], peak_idx[1:]):
-        valley_rel = int(np.argmin(p[left_peak:right_peak + 1]))
+        valley_rel = int(np.argmin(p[left_peak : right_peak + 1]))
         valley_idx = left_peak + valley_rel
         bounds.append((start, valley_idx))
         start = valley_idx + 1
@@ -726,8 +751,8 @@ def _extract_wave_partitions(
     for b_start, b_end in bounds:
         if b_end <= b_start + 1:
             continue
-        f_seg = f[b_start:b_end + 1]
-        p_seg = p[b_start:b_end + 1]
+        f_seg = f[b_start : b_end + 1]
+        p_seg = p[b_start : b_end + 1]
         m0 = float(_trapz(p_seg, f_seg))
         if m0 <= 0:
             continue
@@ -853,7 +878,7 @@ def estimate_waves_from_accel(
         return result
 
     # --- Acceleration statistics --- #
-    result.accel_rms = float(np.sqrt(np.mean(vertical_accel ** 2)))
+    result.accel_rms = float(np.sqrt(np.mean(vertical_accel**2)))
 
     # --- Dominant frequency from Welch PSD --- #
     # For ocean waves (0.03–0.5 Hz) at typical IMU rates (50 Hz),
@@ -890,7 +915,10 @@ def estimate_waves_from_accel(
 
     # --- Spectral Hs from m0 integration (independent of peak freq) --- #
     spectral_hs = _spectral_hs_from_displacement_psd(
-        freqs, psd_valid, freq_min_hz, freq_max_hz,
+        freqs,
+        psd_valid,
+        freq_min_hz,
+        freq_max_hz,
     )
     result.spectral_hs = spectral_hs
 
@@ -902,7 +930,7 @@ def estimate_waves_from_accel(
     # corresponds to the dominant wave period rather than high-frequency
     # boat vibration or slamming.
     psd_disp = psd_valid.copy()
-    freq_sq = freqs ** 2
+    freq_sq = freqs**2
     freq_sq[freq_sq < 1e-6] = 1e-6  # avoid division by zero at DC
     psd_disp /= freq_sq
 
@@ -912,7 +940,9 @@ def estimate_waves_from_accel(
     # hull-amplified response.
     if hull_params is not None:
         psd_disp = _hull_resonance_suppression(
-            freqs, psd_disp, hull_params,
+            freqs,
+            psd_disp,
+            hull_params,
             suppression_factor=0.1,
             bandwidth_hz=0.08,
         )
@@ -963,13 +993,17 @@ def estimate_waves_from_accel(
 
     # --- Trochoidal estimate --- #
     troch = trochoidal_wave_height(
-        accel_max, dom_freq, delta_v,
+        accel_max,
+        dom_freq,
+        delta_v,
         min_amplitude=trochoidal_min_amplitude,
     )
     if troch is None:
         logger.debug(
             "trochoidal=None: accel_max=%.4f, dom_freq=%.4f, delta_v=%.2f",
-            accel_max, dom_freq, delta_v,
+            accel_max,
+            dom_freq,
+            delta_v,
         )
     result.trochoidal = troch
 
@@ -1021,7 +1055,8 @@ def estimate_waves_from_accel(
         elif result.significant_height < spectral_hs * 0.4:
             logger.debug(
                 "spectral cross-check: upgrading Hs from %.2f to %.2f (spectral)",
-                result.significant_height, spectral_hs,
+                result.significant_height,
+                spectral_hs,
             )
             result.significant_height = spectral_hs
             result.method_used = "spectral"

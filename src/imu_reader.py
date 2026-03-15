@@ -19,6 +19,7 @@ Typical usage::
         sample = await reader.read_sample()
         print(sample)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -87,9 +88,11 @@ _GRAVITY = 9.80665
 # Data structures                                                              #
 # --------------------------------------------------------------------------- #
 
+
 @dataclass
 class IMUSample:
     """A single timestamped reading from the ICM-20948."""
+
     timestamp: datetime
 
     # Accelerometer (m/s²) — IMU body frame
@@ -117,9 +120,7 @@ class IMUSample:
     @property
     def accel_magnitude(self) -> float:
         """Total acceleration magnitude in m/s²."""
-        return math.sqrt(
-            self.accel_x ** 2 + self.accel_y ** 2 + self.accel_z ** 2
-        )
+        return math.sqrt(self.accel_x**2 + self.accel_y**2 + self.accel_z**2)
 
     @property
     def vertical_accel(self) -> float:
@@ -145,14 +146,16 @@ class IMUSample:
             # the dot product (gravity points down, accel at rest
             # points up) — actually, at rest accel = +g along gravity
             # direction, so dot(accel, grav_unit) = +g at rest.
-            return (self.accel_x * gx + self.accel_y * gy
-                    + self.accel_z * gz) - _GRAVITY
+            return (
+                self.accel_x * gx + self.accel_y * gy + self.accel_z * gz
+            ) - _GRAVITY
         return self.accel_magnitude - _GRAVITY
 
 
 # --------------------------------------------------------------------------- #
 # Low-level synchronous driver                                                 #
 # --------------------------------------------------------------------------- #
+
 
 class _ICM20948Driver:
     """Thin synchronous driver for ICM-20948 over smbus2.
@@ -164,6 +167,7 @@ class _ICM20948Driver:
 
     def __init__(self, bus_number: int = 1, address: int = _I2C_ADDR) -> None:
         from smbus2 import SMBus
+
         self._bus = SMBus(bus_number)
         self._addr = address
         self._current_bank = -1
@@ -249,7 +253,7 @@ class _ICM20948Driver:
         self._write(_GYRO_SMPLRT_DIV, rate)
         # Low-pass enabled, mode 5, ±250 dps
         value = self._read(_GYRO_CONFIG_1) & 0b10001110
-        value |= 0b1             # enable LPF
+        value |= 0b1  # enable LPF
         value |= (5 & 0x07) << 4  # mode 5
         # scale ±250 already 0b00
         self._write(_GYRO_CONFIG_1, value)
@@ -259,9 +263,9 @@ class _ICM20948Driver:
         self._write(_ACCEL_SMPLRT_DIV_1, (rate >> 8) & 0xFF)
         self._write(_ACCEL_SMPLRT_DIV_2, rate & 0xFF)
         value = self._read(_ACCEL_CONFIG) & 0b10001110
-        value |= 0b1               # enable LPF
-        value |= (5 & 0x07) << 4   # mode 5
-        value |= 0b01 << 1         # ±4g (better resolution for sea state)
+        value |= 0b1  # enable LPF
+        value |= (5 & 0x07) << 4  # mode 5
+        value |= 0b01 << 1  # ±4g (better resolution for sea state)
         self._write(_ACCEL_CONFIG, value)
 
         # I2C master setup for magnetometer passthrough
@@ -278,7 +282,8 @@ class _ICM20948Driver:
         if mag_id != _AK09916_CHIP_ID:
             logger.warning(
                 "AK09916 magnetometer not found: WIA=0x%02X (expected 0x%02X)",
-                mag_id, _AK09916_CHIP_ID,
+                mag_id,
+                _AK09916_CHIP_ID,
             )
         else:
             # Reset magnetometer
@@ -319,7 +324,9 @@ class _ICM20948Driver:
 
         return ax_ms2, ay_ms2, az_ms2, gx_rads, gy_rads, gz_rads
 
-    def read_magnetometer(self, timeout: float = 0.1) -> Optional[Tuple[float, float, float]]:
+    def read_magnetometer(
+        self, timeout: float = 0.1
+    ) -> Optional[Tuple[float, float, float]]:
         """Read magnetometer (µT). Returns (mx, my, mz) or None on timeout."""
         try:
             self._mag_write(_AK09916_CNTL2, 0x01)  # single measurement
@@ -350,6 +357,7 @@ class _ICM20948Driver:
 # Async wrapper                                                                #
 # --------------------------------------------------------------------------- #
 
+
 class IMUReader:
     """Async wrapper around the ICM-20948 driver.
 
@@ -360,7 +368,9 @@ class IMUReader:
     I2C bus for known IMU chips before falling back to the given address.
     """
 
-    def __init__(self, driver: _ICM20948Driver, *, chip_name: str = "ICM-20948") -> None:
+    def __init__(
+        self, driver: _ICM20948Driver, *, chip_name: str = "ICM-20948"
+    ) -> None:
         self._driver = driver
         self._chip_name = chip_name
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -398,7 +408,8 @@ class IMUReader:
 
         if auto_detect:
             try:
-                from imu_detect import detect_imu, discover_i2c_buses
+                from imu_detect import detect_imu
+
                 loop = asyncio.get_running_loop()
                 result = await loop.run_in_executor(None, detect_imu)
                 if result is not None:
@@ -407,23 +418,31 @@ class IMUReader:
                     effective_bus = result.bus_number
                     logger.info(
                         "Auto-detected %s at bus=%d addr=0x%02X",
-                        detected_chip_name, effective_bus, effective_address,
+                        detected_chip_name,
+                        effective_bus,
+                        effective_address,
                     )
                     if detected_chip_name != "ICM-20948":
                         logger.warning(
                             "Detected %s but only ICM-20948 driver is implemented; "
                             "attempting ICM-20948 init at 0x%02X anyway",
-                            detected_chip_name, effective_address,
+                            detected_chip_name,
+                            effective_address,
                         )
                 else:
                     logger.info(
                         "Auto-detect found no known IMU on any bus; "
                         "falling back to bus=%d addr=0x%02X",
-                        bus_number, address,
+                        bus_number,
+                        address,
                     )
             except Exception as exc:
-                logger.debug("Auto-detect failed: %s — falling back to bus=%d 0x%02X",
-                             exc, bus_number, address)
+                logger.debug(
+                    "Auto-detect failed: %s — falling back to bus=%d 0x%02X",
+                    exc,
+                    bus_number,
+                    address,
+                )
 
         try:
             loop = asyncio.get_running_loop()
@@ -435,7 +454,9 @@ class IMUReader:
             reader._loop = loop
             logger.info(
                 "IMU reader ready (%s, bus=%d, addr=0x%02X)",
-                detected_chip_name, effective_bus, effective_address,
+                detected_chip_name,
+                effective_bus,
+                effective_address,
             )
             return reader
         except Exception as exc:
@@ -541,7 +562,11 @@ class IMUReader:
                 "IMU gravity calibration: body-frame direction = "
                 "(%.3f, %.3f, %.3f), tilt from chip Z = %.1f° "
                 "(%d samples)",
-                gx, gy, gz, tilt_deg, self._grav_n,
+                gx,
+                gy,
+                gz,
+                tilt_deg,
+                self._grav_n,
             )
 
     async def read_sample(self) -> IMUSample:
@@ -555,12 +580,8 @@ class IMUReader:
         # Continuously refine gravity estimate
         self._update_gravity(ax, ay, az)
 
-        mag = await loop.run_in_executor(
-            None, self._driver.read_magnetometer
-        )
-        temp = await loop.run_in_executor(
-            None, self._driver.read_temperature
-        )
+        mag = await loop.run_in_executor(None, self._driver.read_magnetometer)
+        temp = await loop.run_in_executor(None, self._driver.read_temperature)
 
         return IMUSample(
             timestamp=now,

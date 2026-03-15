@@ -12,12 +12,13 @@ IMPORTANT DOMAIN NOTE:
   All outputs are inferences about vessel motion response to sea state.
   They are NOT direct measurements of wave height, direction, or period.
 """
+
 from __future__ import annotations
 
 import logging
 import math
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Deque, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -31,23 +32,26 @@ from models import InstantSample, LayerAFeatures, MotionEstimate, WindowFeatures
 try:
     from heave_estimator import (
         KalmanHeaveEstimator,
-        WaveEstimate,
+        WaveEstimate,  # noqa: F401
         estimate_waves_from_accel,
     )
+
     _HEAVE_AVAILABLE = True
 except ImportError:
     _HEAVE_AVAILABLE = False
 
 # Vessel hull parameters (optional -- degrades gracefully)
 try:
-    from vessel_config import HullParameters, rao_gain, rao_confidence_adjustment
+    from vessel_config import HullParameters, rao_gain, rao_confidence_adjustment  # noqa: F401
+
     _HULL_AVAILABLE = True
 except ImportError:
     _HULL_AVAILABLE = False
 
 # Online sea-state learner (optional -- degrades gracefully)
 try:
-    from sea_state_learner import SeaStateLearner
+    from sea_state_learner import SeaStateLearner  # noqa: F401
+
     _LEARNER_AVAILABLE = True
 except ImportError:
     _LEARNER_AVAILABLE = False
@@ -59,8 +63,9 @@ logger = logging.getLogger(__name__)
 # Low-level signal-processing utilities                                        #
 # --------------------------------------------------------------------------- #
 
+
 def _rms(x: np.ndarray) -> float:
-    return float(np.sqrt(np.mean(x ** 2)))
+    return float(np.sqrt(np.mean(x**2)))
 
 
 def _crest_factor(x: np.ndarray) -> Optional[float]:
@@ -88,7 +93,9 @@ def _zero_crossing_period(x: np.ndarray, fs: float) -> Optional[float]:
 
 def _welch_dominant(
     x: np.ndarray, fs: float, min_samples: int = 16
-) -> Tuple[Optional[float], Optional[float], Optional[np.ndarray], Optional[np.ndarray]]:
+) -> Tuple[
+    Optional[float], Optional[float], Optional[np.ndarray], Optional[np.ndarray]
+]:
     """
     Compute Welch PSD for x sampled at fs Hz.
 
@@ -310,7 +317,9 @@ def compute_delta_v(
     return None
 
 
-def classify_wave_heading(delta_v: Optional[float], stw: Optional[float]) -> Optional[str]:
+def classify_wave_heading(
+    delta_v: Optional[float], stw: Optional[float]
+) -> Optional[str]:
     """
     Classify wave approach direction based on delta_v / STW ratio.
 
@@ -338,6 +347,7 @@ def classify_wave_heading(delta_v: Optional[float], stw: Optional[float]) -> Opt
 # Feature extractor                                                            #
 # --------------------------------------------------------------------------- #
 
+
 class FeatureExtractor:
     """
     Stateful feature extractor.  Call add_sample() at the configured sample
@@ -363,13 +373,12 @@ class FeatureExtractor:
 
         # Rolling sample buffers keyed by window size in seconds
         self._buffers: Dict[int, Deque[InstantSample]] = {
-            w: deque(maxlen=int(w * self._fs))
-            for w in config.rolling_windows_s
+            w: deque(maxlen=int(w * self._fs)) for w in config.rolling_windows_s
         }
 
         # Previous-sample state for derivative computation
         self._prev_sample: Optional[InstantSample] = None
-        self._prev_roll_uw: Optional[float] = None   # unwrapped
+        self._prev_roll_uw: Optional[float] = None  # unwrapped
         self._prev_pitch_uw: Optional[float] = None
         self._prev_yaw_uw: Optional[float] = None
 
@@ -398,7 +407,9 @@ class FeatureExtractor:
         }
 
         # Trend: severity history keyed by window
-        self._severity_history: Deque[Tuple[datetime, float]] = deque(maxlen=int(30 * 60 * self._fs))
+        self._severity_history: Deque[Tuple[datetime, float]] = deque(
+            maxlen=int(30 * 60 * self._fs)
+        )
 
         # Vertical acceleration buffer for wave estimation (separate from
         # the main rolling buffers because accel arrives at IMU sample rate,
@@ -768,9 +779,7 @@ class FeatureExtractor:
     # Internal helpers                                                      #
     # ------------------------------------------------------------------ #
 
-    def _apply_doppler_correction(
-        self, me: MotionEstimate, wf: WindowFeatures
-    ) -> None:
+    def _apply_doppler_correction(self, me: MotionEstimate, wf: WindowFeatures) -> None:
         """
         Attempt Doppler correction on the encounter period estimate.
 
@@ -795,11 +804,14 @@ class FeatureExtractor:
         encounter_freq = 1.0 / encounter_period
 
         # --- Guard: manoeuvre detection via rudder angle --- #
-        if (wf.rudder_angle_std is not None
-                and wf.rudder_angle_std > cfg.doppler_rudder_std_max):
+        if (
+            wf.rudder_angle_std is not None
+            and wf.rudder_angle_std > cfg.doppler_rudder_std_max
+        ):
             logger.debug(
                 "Doppler correction suppressed: rudder_angle_std=%.3f > %.3f",
-                wf.rudder_angle_std, cfg.doppler_rudder_std_max,
+                wf.rudder_angle_std,
+                cfg.doppler_rudder_std_max,
             )
             return
 
@@ -847,7 +859,8 @@ class FeatureExtractor:
             if wf.depth_mean < wavelength / 2.0:
                 logger.debug(
                     "Doppler correction in shallow water: depth=%.1f m < L/2=%.1f m",
-                    wf.depth_mean, wavelength / 2.0,
+                    wf.depth_mean,
+                    wavelength / 2.0,
                 )
                 # Still provide the estimate but mark it as not fully valid
                 me.doppler_correction_valid = False
@@ -855,9 +868,7 @@ class FeatureExtractor:
 
         me.doppler_correction_valid = True
 
-    def _apply_wave_estimation(
-        self, me: MotionEstimate, wf: WindowFeatures
-    ) -> None:
+    def _apply_wave_estimation(self, me: MotionEstimate, wf: WindowFeatures) -> None:
         """Estimate wave height from buffered vertical acceleration data.
 
         Uses both trochoidal and Kalman methods via the heave_estimator
@@ -923,9 +934,11 @@ class FeatureExtractor:
                     wave_est.significant_height = kalman_est.significant_height
                     wave_est.method_used = "kalman"
                     if not kalman_est.converged:
-                        wave_est.confidence = min(
-                            wave_est.confidence, 0.3
-                        ) if wave_est.confidence > 0 else 0.3
+                        wave_est.confidence = (
+                            min(wave_est.confidence, 0.3)
+                            if wave_est.confidence > 0
+                            else 0.3
+                        )
         self._latest_wave_estimate = wave_est
 
         # Log wave estimation result
@@ -935,10 +948,16 @@ class FeatureExtractor:
             len(accel_data),
             wave_est.accel_rms or 0.0,
             wave_est.accel_dominant_freq or 0.0,
-            f"{wave_est.trochoidal.significant_height:.3f}" if wave_est.trochoidal else "None",
+            f"{wave_est.trochoidal.significant_height:.3f}"
+            if wave_est.trochoidal
+            else "None",
             f"{wave_est.kalman.significant_height:.3f}" if wave_est.kalman else "None",
-            f"{wave_est.spectral_hs:.3f}" if wave_est.spectral_hs is not None else "None",
-            f"{wave_est.significant_height:.3f}" if wave_est.significant_height is not None else "None",
+            f"{wave_est.spectral_hs:.3f}"
+            if wave_est.spectral_hs is not None
+            else "None",
+            f"{wave_est.significant_height:.3f}"
+            if wave_est.significant_height is not None
+            else "None",
             wave_est.method_used,
             wave_est.accel_max or 0.0,
         )
@@ -1013,9 +1032,7 @@ class FeatureExtractor:
         me.significant_height = round(me.significant_height / gain, 3)
 
         # Adjust wave height confidence
-        _period_boost, hs_penalty = rao_confidence_adjustment(
-            period, self._hull_params
-        )
+        _period_boost, hs_penalty = rao_confidence_adjustment(period, self._hull_params)
         if me.wave_height_confidence is not None:
             me.wave_height_confidence = round(
                 float(np.clip(me.wave_height_confidence * hs_penalty, 0.0, 1.0)),
@@ -1061,7 +1078,9 @@ class FeatureExtractor:
                 me.significant_height = round(me.significant_height * factor, 3)
                 logger.debug(
                     "Learned correction: period=%.1fs dir=%s factor=%.3f",
-                    period, me.encounter_direction, factor,
+                    period,
+                    me.encounter_direction,
+                    factor,
                 )
 
     def _compute_severity(self, wf: WindowFeatures) -> float:
@@ -1098,35 +1117,29 @@ class FeatureExtractor:
                 1.0, wf.roll_spectral_energy / roll_spectral_max
             )
         if wf.yaw_rate_var is not None:
-            scores["yaw_rate_var"] = min(
-                1.0, wf.yaw_rate_var / yaw_rate_var_max
-            )
+            scores["yaw_rate_var"] = min(1.0, wf.yaw_rate_var / yaw_rate_var_max)
 
         if not scores:
             return 0.0
 
         # Use hull-type-specific weights if available, else config defaults
-        weights = (hp.severity_weights if hp is not None and hp.severity_weights
-                   else cfg.severity_weights)
+        weights = (
+            hp.severity_weights
+            if hp is not None and hp.severity_weights
+            else cfg.severity_weights
+        )
 
         total_weight = sum(weights.get(k, 0.0) for k in scores)
         if total_weight == 0:
             return 0.0
 
-        weighted = sum(
-            scores[k] * weights.get(k, 0.0) for k in scores
-        )
+        weighted = sum(scores[k] * weights.get(k, 0.0) for k in scores)
         return float(weighted / total_weight)
 
     def _estimate_trend(self, now: datetime) -> str:
         hist = list(self._severity_history)
         if len(hist) < 10:
             return "stable"
-
-        window_lengths = [
-            (5 * 60, 15 * 60),
-            (5 * 60, 30 * 60),
-        ]
 
         def _mean_in_last(seconds: float) -> Optional[float]:
             cutoff = now.timestamp() - seconds
@@ -1162,6 +1175,7 @@ class FeatureExtractor:
 # --------------------------------------------------------------------------- #
 # Module-level heuristic functions                                             #
 # --------------------------------------------------------------------------- #
+
 
 def _angle_relative_to_bow(angle_abs: float, heading: float) -> float:
     """Convert an absolute wind angle (rad) to angle relative to bow."""

@@ -22,11 +22,11 @@ Delta format::
       }]
     }
 """
+
 from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from models import MotionEstimate
@@ -184,8 +184,7 @@ def build_meta_delta(
         A JSON string ready to send over the WebSocket.
     """
     meta_entries: List[Dict[str, Any]] = [
-        {"path": path, "value": dict(meta)}
-        for path, meta in WAVE_PATH_META.items()
+        {"path": path, "value": dict(meta)} for path, meta in WAVE_PATH_META.items()
     ]
     delta = {
         "context": self_context,
@@ -224,8 +223,9 @@ async def publish_delta(
 
     try:
         await ws.send(msg)
-        logger.debug("Published delta (%d bytes, %d values)",
-                      len(msg), msg.count('"path"'))
+        logger.debug(
+            "Published delta (%d bytes, %d values)", len(msg), msg.count('"path"')
+        )
         return True
     except Exception as exc:
         logger.warning("Failed to publish delta: %s", exc)

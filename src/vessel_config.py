@@ -13,12 +13,13 @@ thresholds) and Phase 3 (online learning of vessel transfer function).
 
 All lengths in metres, periods in seconds, angles in radians.
 """
+
 from __future__ import annotations
 
 import enum
 import logging
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -31,8 +32,10 @@ TWO_PI = 2.0 * math.pi
 # Hull type classification                                                     #
 # --------------------------------------------------------------------------- #
 
+
 class HullType(enum.Enum):
     """Hull type inferred from beam-to-length ratio."""
+
     MONOHULL = "monohull"
     TRIMARAN = "trimaran"
     CATAMARAN = "catamaran"
@@ -69,6 +72,7 @@ def classify_hull_type(beam_length_ratio: float) -> HullType:
 # Data structures                                                              #
 # --------------------------------------------------------------------------- #
 
+
 @dataclass
 class VesselDesign:
     """Raw vessel design values from Signal K.
@@ -76,16 +80,17 @@ class VesselDesign:
     Fields are Optional because the Signal K server may not have all
     design data populated.
     """
-    loa: Optional[float] = None             # metres (length overall)
-    beam: Optional[float] = None            # metres
-    draft_max: Optional[float] = None       # metres
-    draft_min: Optional[float] = None       # metres
-    air_height: Optional[float] = None      # metres (mast height above waterline)
-    displacement: Optional[float] = None    # kg
+
+    loa: Optional[float] = None  # metres (length overall)
+    beam: Optional[float] = None  # metres
+    draft_max: Optional[float] = None  # metres
+    draft_min: Optional[float] = None  # metres
+    air_height: Optional[float] = None  # metres (mast height above waterline)
+    displacement: Optional[float] = None  # kg
     ais_ship_type_id: Optional[int] = None  # AIS type code
     ais_ship_type_name: Optional[str] = None  # e.g. "Sailing"
-    hull_type_name: Optional[str] = None    # from design.hullType if available
-    rigging_name: Optional[str] = None      # from design.rigging if available
+    hull_type_name: Optional[str] = None  # from design.hullType if available
+    rigging_name: Optional[str] = None  # from design.rigging if available
 
     @property
     def beam_length_ratio(self) -> Optional[float]:
@@ -107,20 +112,23 @@ class HullParameters:
     Used by the feature extractor to apply hull-aware corrections to
     severity scoring, RAO gain, and confidence estimation.
     """
+
     hull_type: HullType = HullType.UNKNOWN
     beam_length_ratio: Optional[float] = None
 
     # Hull resonance
-    resonant_wavelength: Optional[float] = None    # metres (~ LOA)
-    resonant_period: Optional[float] = None        # seconds (deep-water T for resonant_wavelength)
+    resonant_wavelength: Optional[float] = None  # metres (~ LOA)
+    resonant_period: Optional[float] = (
+        None  # seconds (deep-water T for resonant_wavelength)
+    )
 
     # Beam resonance
     beam_resonant_wavelength: Optional[float] = None  # metres (~ beam)
-    beam_resonant_period: Optional[float] = None      # seconds
+    beam_resonant_period: Optional[float] = None  # seconds
 
     # Natural roll period range (hull-type dependent)
-    natural_roll_period_min: Optional[float] = None   # seconds
-    natural_roll_period_max: Optional[float] = None   # seconds
+    natural_roll_period_min: Optional[float] = None  # seconds
+    natural_roll_period_max: Optional[float] = None  # seconds
 
     # Natural pitch period range
     natural_pitch_period_min: Optional[float] = None  # seconds
@@ -138,6 +146,7 @@ class HullParameters:
 # --------------------------------------------------------------------------- #
 # Deep-water wave physics                                                      #
 # --------------------------------------------------------------------------- #
+
 
 def wavelength_to_period(wavelength_m: float) -> float:
     """Convert wavelength to period using deep-water dispersion.
@@ -174,12 +183,13 @@ def period_to_wavelength(period_s: float) -> float:
     """
     if period_s <= 0:
         raise ValueError(f"period must be positive, got {period_s}")
-    return GRAVITY * period_s ** 2 / TWO_PI
+    return GRAVITY * period_s**2 / TWO_PI
 
 
 # --------------------------------------------------------------------------- #
 # Hull parameter computation                                                   #
 # --------------------------------------------------------------------------- #
+
 
 def _natural_roll_period_range(hull_type: HullType) -> Tuple[float, float]:
     """Estimated natural roll period range by hull type.
@@ -265,10 +275,10 @@ def _hull_type_severity_max(hull_type: HullType) -> Dict[str, float]:
     """
     if hull_type == HullType.CATAMARAN:
         return {
-            "severity_roll_rms_max": 0.15,       # ~8.6 deg (vs 20 deg for monohull)
-            "severity_pitch_rms_max": 0.175,      # same — cats pitch similarly
-            "severity_roll_spectral_max": 0.05,   # lower spectral energy expected
-            "severity_yaw_rate_var_max": 0.008,   # cats yaw less under wave forcing
+            "severity_roll_rms_max": 0.15,  # ~8.6 deg (vs 20 deg for monohull)
+            "severity_pitch_rms_max": 0.175,  # same — cats pitch similarly
+            "severity_roll_spectral_max": 0.05,  # lower spectral energy expected
+            "severity_yaw_rate_var_max": 0.008,  # cats yaw less under wave forcing
         }
     elif hull_type == HullType.TRIMARAN:
         return {
@@ -345,6 +355,7 @@ def compute_hull_parameters(design: VesselDesign) -> HullParameters:
 # --------------------------------------------------------------------------- #
 # Signal K REST API fetch                                                      #
 # --------------------------------------------------------------------------- #
+
 
 def _parse_design_response(data: Dict[str, Any]) -> VesselDesign:
     """Parse the Signal K /design endpoint JSON into a VesselDesign.
@@ -521,6 +532,7 @@ def log_hull_parameters(params: HullParameters) -> None:
 # RAO gain curve                                                               #
 # --------------------------------------------------------------------------- #
 
+
 def rao_gain(
     wave_period_s: float,
     hull_params: HullParameters,
@@ -569,13 +581,13 @@ def rao_gain(
         # Conservative values: the RAO model is approximate and uncalibrated.
         # The Phase 3 online learner will refine these over time.
         if hull_params.hull_type == HullType.CATAMARAN:
-            peak = 1.25   # conservative until learner calibrates
-            bw = 0.8      # moderate bandwidth
+            peak = 1.25  # conservative until learner calibrates
+            bw = 0.8  # moderate bandwidth
         elif hull_params.hull_type == HullType.TRIMARAN:
             peak = 1.20
             bw = 0.9
         else:
-            peak = 1.15   # monohull: broader, lower peak
+            peak = 1.15  # monohull: broader, lower peak
             bw = 1.0
 
         # Lorentzian resonance curve
@@ -583,7 +595,10 @@ def rao_gain(
         gain += (peak - 1.0) / (1.0 + delta * delta)
 
     # Secondary resonance: beam resonance (mainly affects beam seas)
-    if hull_params.beam_resonant_period is not None and hull_params.beam_resonant_period > 0:
+    if (
+        hull_params.beam_resonant_period is not None
+        and hull_params.beam_resonant_period > 0
+    ):
         t_beam = hull_params.beam_resonant_period
 
         if hull_params.hull_type == HullType.CATAMARAN:
@@ -650,15 +665,15 @@ def rao_confidence_adjustment(
         else:
             centrality = 1.0
 
-        period_boost = 1.0 + 0.3 * centrality   # up to 1.3x
-        hs_penalty = 1.0 - 0.3 * centrality     # down to 0.7x
+        period_boost = 1.0 + 0.3 * centrality  # up to 1.3x
+        hs_penalty = 1.0 - 0.3 * centrality  # down to 0.7x
 
     # Additional RAO-based penalty: higher gain = less reliable Hs
     gain = rao_gain(wave_period_s, hull_params)
     if gain > 1.2:
         # Excess gain above 1.2 penalises Hs confidence
         excess = min(1.0, (gain - 1.2) / 1.0)  # normalised 0-1
-        hs_penalty *= (1.0 - 0.3 * excess)      # additional up to 30% penalty
+        hs_penalty *= 1.0 - 0.3 * excess  # additional up to 30% penalty
 
     return (
         float(max(0.5, min(1.5, period_boost))),

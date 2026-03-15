@@ -1,7 +1,7 @@
 """Tests for Signal K delta parsing and self-path filtering."""
+
 from __future__ import annotations
 
-import json
 import sys
 import os
 import pytest
@@ -13,12 +13,13 @@ from config import Config
 from models import SignalKValueUpdate
 from signalk_client import SignalKClient, _parse_sk_timestamp, _extract_source_label
 from state_store import SelfStateStore
-from paths import ATTITUDE_ROLL, ATTITUDE_PITCH, ATTITUDE_YAW, ATTITUDE
+from paths import ATTITUDE_ROLL, ATTITUDE
 
 
 # --------------------------------------------------------------------------- #
 # Timestamp parsing                                                            #
 # --------------------------------------------------------------------------- #
+
 
 def test_parse_sk_timestamp_utc_z():
     ts = _parse_sk_timestamp("2024-06-01T12:00:00.000Z")
@@ -44,6 +45,7 @@ def test_parse_sk_timestamp_none():
 # Source label extraction                                                      #
 # --------------------------------------------------------------------------- #
 
+
 def test_extract_source_label_dollar_source():
     block = {"$source": "my.sensor", "values": []}
     assert _extract_source_label(block) == "my.sensor"
@@ -62,6 +64,7 @@ def test_extract_source_label_missing():
 # --------------------------------------------------------------------------- #
 # Self context filtering                                                       #
 # --------------------------------------------------------------------------- #
+
 
 def test_self_filter_vessels_self():
     config = Config()
@@ -87,6 +90,7 @@ def test_self_filter_other_vessel():
 # --------------------------------------------------------------------------- #
 # State store: delta merging                                                    #
 # --------------------------------------------------------------------------- #
+
 
 def _make_update(path: str, value, received_at=None) -> SignalKValueUpdate:
     if received_at is None:
@@ -144,6 +148,7 @@ def test_state_store_none_value_ignored():
 
 def test_state_store_freshness():
     import time
+
     config = Config(stale_threshold_s=1.0)
     store = SelfStateStore(config)
     store.apply_update_sync(_make_update(ATTITUDE_ROLL, 0.10))
@@ -159,6 +164,7 @@ def test_state_store_position():
     config = Config()
     store = SelfStateStore(config)
     from paths import POSITION
+
     pos = {"latitude": 51.5, "longitude": -0.1}
     store.apply_update_sync(_make_update(POSITION, pos))
     snap = store.snapshot()

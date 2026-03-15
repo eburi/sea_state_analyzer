@@ -15,6 +15,7 @@ IMPORTANT DOMAIN NOTE:
   all modulate the observed motion.  Outputs must be treated as inferred
   motion proxies, not authoritative environmental measurements.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -28,7 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Deque, Dict, List, Optional
 
-from config import Config, DEFAULT_CONFIG
+from config import Config
 from feature_extractor import FeatureExtractor
 from models import (
     InstantSample,
@@ -52,6 +53,7 @@ try:
         log_hull_parameters,
         HullParameters,
     )
+
     _VESSEL_CONFIG_AVAILABLE = True
 except ImportError:
     _VESSEL_CONFIG_AVAILABLE = False
@@ -59,6 +61,7 @@ except ImportError:
 # Try importing publisher
 try:
     from signalk_publisher import build_delta_message, build_meta_delta
+
     _PUBLISHER_AVAILABLE = True
 except ImportError:
     _PUBLISHER_AVAILABLE = False
@@ -66,6 +69,7 @@ except ImportError:
 # Try importing auth module
 try:
     from signalk_auth import ensure_auth_token
+
     _AUTH_AVAILABLE = True
 except ImportError:
     _AUTH_AVAILABLE = False
@@ -73,6 +77,7 @@ except ImportError:
 # Try importing sea state learner
 try:
     from sea_state_learner import SeaStateLearner
+
     _LEARNER_AVAILABLE = True
 except ImportError:
     _LEARNER_AVAILABLE = False
@@ -82,12 +87,14 @@ logger = logging.getLogger(__name__)
 # Try importing IMU reader — absent on Mac / without smbus2
 try:
     from imu_reader import IMUReader, IMUSample
+
     _IMU_AVAILABLE = True
 except ImportError:
     _IMU_AVAILABLE = False
 
     class _IMUReaderStub:  # type: ignore[no-redef]
         """Placeholder so attribute access doesn't crash at type-check time."""
+
         @staticmethod
         async def create(**kwargs: object) -> None:
             return None
@@ -99,6 +106,7 @@ except ImportError:
 # --------------------------------------------------------------------------- #
 # Shared pipeline helpers                                                      #
 # --------------------------------------------------------------------------- #
+
 
 def _setup_logging(level: int) -> None:
     logging.basicConfig(
@@ -116,6 +124,7 @@ def _now_utc() -> datetime:
 # --------------------------------------------------------------------------- #
 # LIVE MODE                                                                    #
 # --------------------------------------------------------------------------- #
+
 
 async def _live_mode(config: Config) -> None:
     """
@@ -151,7 +160,9 @@ async def _live_mode(config: Config) -> None:
             elif design is not None:
                 logger.info("Vessel design fetched but insufficient data (no LOA)")
             else:
-                logger.info("Vessel design not available — using default hull parameters")
+                logger.info(
+                    "Vessel design not available — using default hull parameters"
+                )
         except Exception as exc:
             logger.warning("Vessel design fetch failed: %s — using defaults", exc)
     else:
@@ -180,7 +191,9 @@ async def _live_mode(config: Config) -> None:
     if not (config.publish_to_signalk and _PUBLISHER_AVAILABLE and _AUTH_AVAILABLE):
         # Publishing not configured or deps missing — nothing to wait for
         if config.publish_to_signalk and not _AUTH_AVAILABLE:
-            logger.warning("publish_to_signalk=True but signalk_auth module not available")
+            logger.warning(
+                "publish_to_signalk=True but signalk_auth module not available"
+            )
         auth_ready.set()  # unblock publish_loop (it will still check _PUBLISHER_AVAILABLE)
 
     async def _auth_task() -> None:
@@ -203,7 +216,9 @@ async def _live_mode(config: Config) -> None:
                 auth = await ensure_auth_token(config)
                 if auth and auth.token:
                     client.set_auth_token(auth.token)
-                    logger.info("Authenticated — forcing reconnect for authenticated WebSocket")
+                    logger.info(
+                        "Authenticated — forcing reconnect for authenticated WebSocket"
+                    )
                     await client.reconnect()
                     auth_ready.set()
                     return
@@ -213,7 +228,8 @@ async def _live_mode(config: Config) -> None:
                         "Could not obtain auth token (attempt %d) — "
                         "retrying in %ds. Approve the device request in "
                         "Signal K admin UI.",
-                        attempt + 1, delay,
+                        attempt + 1,
+                        delay,
                     )
                     attempt += 1
                     await asyncio.sleep(delay)
@@ -221,7 +237,9 @@ async def _live_mode(config: Config) -> None:
                 delay = backoff_delays[min(attempt, len(backoff_delays) - 1)]
                 logger.error(
                     "Auth task failed (attempt %d): %s — retrying in %ds",
-                    attempt + 1, exc, delay,
+                    attempt + 1,
+                    exc,
+                    delay,
                 )
                 attempt += 1
                 await asyncio.sleep(delay)
@@ -235,20 +253,29 @@ async def _live_mode(config: Config) -> None:
     latest_imu_sample: Optional["IMUSample"] = None  # type: ignore[name-defined]
 
     if config.imu_enabled and _IMU_AVAILABLE:
-        logger.info("Attempting IMU init on i2c bus %d (auto_detect=%s, fallback_addr=0x%02X)…",
-                     config.imu_bus_number, config.imu_auto_detect, config.imu_address)
+        logger.info(
+            "Attempting IMU init on i2c bus %d (auto_detect=%s, fallback_addr=0x%02X)…",
+            config.imu_bus_number,
+            config.imu_auto_detect,
+            config.imu_address,
+        )
         imu_reader = await IMUReader.create(
             bus_number=config.imu_bus_number,
             address=config.imu_address,
             auto_detect=config.imu_auto_detect,
         )
         if imu_reader is not None:
-            logger.info("IMU reader active (%s) – sampling at %.0f Hz",
-                        imu_reader.chip_name, config.imu_sample_rate_hz)
+            logger.info(
+                "IMU reader active (%s) – sampling at %.0f Hz",
+                imu_reader.chip_name,
+                config.imu_sample_rate_hz,
+            )
             # Seed gravity-direction estimate (10 s ≈ 1+ wave cycles).
             # The estimate continues to refine with every subsequent read.
             logger.info("Calibrating IMU mounting orientation (10 s)…")
-            await imu_reader.calibrate(duration_s=10.0, rate_hz=config.imu_sample_rate_hz)
+            await imu_reader.calibrate(
+                duration_s=10.0, rate_hz=config.imu_sample_rate_hz
+            )
         else:
             logger.info("IMU not available – continuing without accelerometer data")
     elif not _IMU_AVAILABLE:
@@ -264,7 +291,9 @@ async def _live_mode(config: Config) -> None:
     samples_produced = 0
 
     # History buffers for offline plots (bounded)
-    plot_sample_buf: Deque[InstantSample] = deque(maxlen=int(30 * 60 * config.sample_rate_hz))
+    plot_sample_buf: Deque[InstantSample] = deque(
+        maxlen=int(30 * 60 * config.sample_rate_hz)
+    )
     plot_estimate_buf: Deque[MotionEstimate] = deque(maxlen=int(30 * 60 / 5))
     last_sample: Optional[InstantSample] = None
     last_me: Optional[MotionEstimate] = None
@@ -298,7 +327,10 @@ async def _live_mode(config: Config) -> None:
                     latest_imu_sample = await imu_reader.read_accel_gyro_only()
                 consecutive_errors = 0
                 # Feed vertical accel to feature extractor for wave estimation
-                if latest_imu_sample is not None and latest_imu_sample.vertical_accel is not None:
+                if (
+                    latest_imu_sample is not None
+                    and latest_imu_sample.vertical_accel is not None
+                ):
                     extractor.add_imu_accel(latest_imu_sample.vertical_accel)
             except Exception as exc:
                 consecutive_errors += 1
@@ -360,7 +392,9 @@ async def _live_mode(config: Config) -> None:
             # Motion estimate every 5 s
             if samples_produced % max(1, int(config.sample_rate_hz * 5)) == 0:
                 me = extractor.get_motion_estimate(
-                    window_s=config.rolling_windows_s[min(2, len(config.rolling_windows_s) - 1)],
+                    window_s=config.rolling_windows_s[
+                        min(2, len(config.rolling_windows_s) - 1)
+                    ],
                     short_window_s=config.rolling_windows_s[0],
                 )
                 if me is not None:
@@ -416,6 +450,7 @@ async def _live_mode(config: Config) -> None:
         """
         try:
             import httpx as _httpx
+
             url = f"{cfg.base_url}/signalk/v1/api/vessels/self/environment/water/waves"
             headers: Dict[str, str] = {}
             if sk_client._auth_token:
@@ -472,7 +507,8 @@ async def _live_mode(config: Config) -> None:
                     if meta_ok:
                         logger.info(
                             "Published wave path metadata (%d bytes, %d paths)",
-                            len(meta_msg), len(WAVE_PATH_META),
+                            len(meta_msg),
+                            len(WAVE_PATH_META),
                         )
                         meta_sent = True
                         break
@@ -513,7 +549,8 @@ async def _live_mode(config: Config) -> None:
                         if meta_ok:
                             logger.info(
                                 "Published wave path metadata on retry (%d bytes, %d paths)",
-                                len(meta_msg), len(WAVE_PATH_META),
+                                len(meta_msg),
+                                len(WAVE_PATH_META),
                             )
                             meta_sent = True
                     except Exception:
@@ -522,7 +559,8 @@ async def _live_mode(config: Config) -> None:
                 if publish_count <= 3 or publish_count % 100 == 0:
                     logger.info(
                         "Published wave delta #%d via WS (%d bytes)",
-                        publish_count, len(msg),
+                        publish_count,
+                        len(msg),
                     )
 
                 # Echo-back validation on the 2nd successful publish
@@ -554,7 +592,9 @@ async def _live_mode(config: Config) -> None:
             config.publish_interval_s,
         )
     elif config.publish_to_signalk and not _PUBLISHER_AVAILABLE:
-        logger.warning("publish_to_signalk=True but signalk_publisher module not available")
+        logger.warning(
+            "publish_to_signalk=True but signalk_publisher module not available"
+        )
     else:
         logger.info("Signal K publishing disabled in config")
 
@@ -573,15 +613,14 @@ async def _live_mode(config: Config) -> None:
             learner.save()
             logger.info("Sea-state learner summary: %s", learner.summary())
         if config.enable_live_plots:
-            file_plotter.plot_all(
-                list(plot_sample_buf), {}, list(plot_estimate_buf)
-            )
+            file_plotter.plot_all(list(plot_sample_buf), {}, list(plot_estimate_buf))
         logger.info("Shutdown complete")
 
 
 # --------------------------------------------------------------------------- #
 # INSPECT MODE                                                                 #
 # --------------------------------------------------------------------------- #
+
 
 async def _inspect_mode(config: Config, duration_s: Optional[float] = None) -> None:
     """
@@ -623,10 +662,14 @@ async def _inspect_mode(config: Config, duration_s: Optional[float] = None) -> N
                 entry["sample_values"].append(str(update.value)[:80])
             delta_queue.task_done()
 
-    client_task = asyncio.create_task(client.run_inspect(delta_queue), name="inspect_client")
+    client_task = asyncio.create_task(
+        client.run_inspect(delta_queue), name="inspect_client"
+    )
     observe_task = asyncio.create_task(_observe(), name="observer")
 
-    print(f"\nInspecting Signal K for {duration_s:.0f} seconds…  (Ctrl-C to stop early)\n")
+    print(
+        f"\nInspecting Signal K for {duration_s:.0f} seconds…  (Ctrl-C to stop early)\n"
+    )
     try:
         await asyncio.wait_for(
             asyncio.gather(client_task, observe_task, return_exceptions=True),
@@ -657,8 +700,8 @@ def _write_path_inventory(inventory: Dict[str, dict], output_dir: Path) -> None:
         "",
         "## Summary",
         "",
-        f"| Stat | Value |",
-        f"|------|-------|",
+        "| Stat | Value |",
+        "|------|-------|",
         f"| Total paths observed | {len(inventory)} |",
         f"| Expected paths present | "
         f"{sum(1 for p in SUBSCRIPTION_PATHS if p in inventory)} / {len(SUBSCRIPTION_PATHS)} |",
@@ -687,7 +730,6 @@ def _write_path_inventory(inventory: Dict[str, dict], output_dir: Path) -> None:
     for path, info in sorted_paths:
         sources = ", ".join(sorted(info["sources"])) if info["sources"] else "—"
         samples = " / ".join(info["sample_values"][:3])
-        in_use = "**yes**" if path in SUBSCRIPTION_PATHS else "no"
         lines.append(
             f"| `{path}` | {info['count']} | {info['first_seen'][:19]} | "
             f"{info['last_seen'][:19]} | {sources} | {samples[:60]} |"
@@ -707,24 +749,27 @@ def _write_path_inventory(inventory: Dict[str, dict], output_dir: Path) -> None:
     print(f"\nPath inventory written to: {report_path}")
 
     # Also print a summary
-    print(f"\n{'─'*60}")
+    print(f"\n{'─' * 60}")
     print(f"Paths observed: {len(inventory)}")
-    print(f"Expected paths found: {sum(1 for p in SUBSCRIPTION_PATHS if p in inventory)}/{len(SUBSCRIPTION_PATHS)}")
-    print(f"{'─'*60}")
+    print(
+        f"Expected paths found: {sum(1 for p in SUBSCRIPTION_PATHS if p in inventory)}/{len(SUBSCRIPTION_PATHS)}"
+    )
+    print(f"{'─' * 60}")
     print(f"{'PATH':<50} {'COUNT':>6}")
-    print(f"{'─'*60}")
+    print(f"{'─' * 60}")
     for path, info in sorted_paths[:30]:
         marker = "*" if path in SUBSCRIPTION_PATHS else " "
         print(f"{marker} {path:<48} {info['count']:>6}")
     if len(sorted_paths) > 30:
         print(f"  … and {len(sorted_paths) - 30} more paths")
-    print(f"{'─'*60}")
+    print(f"{'─' * 60}")
     print("  * = expected subscription path")
 
 
 # --------------------------------------------------------------------------- #
 # REPLAY MODE                                                                  #
 # --------------------------------------------------------------------------- #
+
 
 async def _replay_mode(config: Config, input_path: Path) -> None:
     """
@@ -741,13 +786,11 @@ async def _replay_mode(config: Config, input_path: Path) -> None:
     store = SelfStateStore(config)
     extractor = FeatureExtractor(config)
     recorder = Recorder(output_dir, config)
-    term_plotter = TerminalPlotter(config)
     file_plotter = FilePlotter(output_dir, config)
 
     recorder.open()
 
     samples_produced = 0
-    last_me: Optional[MotionEstimate] = None
     plot_samples: List[InstantSample] = []
     plot_estimates: List[MotionEstimate] = []
 
@@ -785,7 +828,7 @@ async def _replay_mode(config: Config, input_path: Path) -> None:
             context = obj.get("context", "vessels.self")
             updates = raw_msg.get("updates", [])
 
-            delta = RawDeltaMessage(
+            RawDeltaMessage(
                 received_at=received_at,
                 context=context,
                 updates=updates,
@@ -823,7 +866,6 @@ async def _replay_mode(config: Config, input_path: Path) -> None:
             ):
                 sample = store.snapshot()
                 # Use the delta's timestamp rather than now()
-                from dataclasses import replace
                 sample = InstantSample(
                     timestamp=received_at,
                     roll=sample.roll,
@@ -856,15 +898,20 @@ async def _replay_mode(config: Config, input_path: Path) -> None:
 
                 if samples_produced % max(1, int(config.sample_rate_hz * 5)) == 0:
                     me = extractor.get_motion_estimate(
-                        window_s=config.rolling_windows_s[min(2, len(config.rolling_windows_s) - 1)]
+                        window_s=config.rolling_windows_s[
+                            min(2, len(config.rolling_windows_s) - 1)
+                        ]
                     )
                     if me is not None:
-                        last_me = me
                         recorder.record_motion_estimate(me)
                         plot_estimates.append(me)
 
                 if samples_produced % 100 == 0:
-                    print(f"\r  Processed {line_no} delta lines → {samples_produced} samples", end="", flush=True)
+                    print(
+                        f"\r  Processed {line_no} delta lines → {samples_produced} samples",
+                        end="",
+                        flush=True,
+                    )
 
     print(f"\n  Done. {samples_produced} samples generated.")
 
@@ -881,6 +928,7 @@ async def _replay_mode(config: Config, input_path: Path) -> None:
 # CLI                                                                          #
 # --------------------------------------------------------------------------- #
 
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Signal K vessel self wave-motion learner",
@@ -891,7 +939,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # live (default)
     live_p = sub.add_parser("live", help="Live Signal K ingestion (default)")
-    live_p.add_argument("--plots", action="store_true", help="Enable live matplotlib plots")
+    live_p.add_argument(
+        "--plots", action="store_true", help="Enable live matplotlib plots"
+    )
     live_p.add_argument("--url", default=None, help="Override Signal K base URL")
 
     # inspect
@@ -907,7 +957,9 @@ def _build_parser() -> argparse.ArgumentParser:
     # replay
     rep_p = sub.add_parser("replay", help="Replay a recorded raw_self_deltas.jsonl")
     rep_p.add_argument("--input", required=True, type=Path, help="Input JSONL file")
-    rep_p.add_argument("--plots", action="store_true", help="Generate plots after replay")
+    rep_p.add_argument(
+        "--plots", action="store_true", help="Generate plots after replay"
+    )
 
     return parser
 
@@ -942,7 +994,9 @@ def main() -> None:
     elif mode == "inspect":
         logger.info("Starting inspect mode → %s", config.base_url)
         try:
-            asyncio.run(_inspect_mode(config, duration_s=getattr(args, "duration", None)))
+            asyncio.run(
+                _inspect_mode(config, duration_s=getattr(args, "duration", None))
+            )
         except KeyboardInterrupt:
             print("\nStopped.")
 

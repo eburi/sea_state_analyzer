@@ -5,13 +5,14 @@ always active.  Matplotlib plots are generated only when
 config.enable_live_plots is True and are written to the output directory as
 PNG files (no GUI required by default).
 """
+
 from __future__ import annotations
 
 import logging
 import math
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Deque, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from config import Config, DEFAULT_CONFIG
 from models import InstantSample, MotionEstimate, SystemStatus, WindowFeatures
@@ -22,9 +23,11 @@ logger = logging.getLogger(__name__)
 _mpl_available = False
 try:
     import matplotlib
+
     matplotlib.use("Agg")  # non-interactive backend; no display required
     import matplotlib.pyplot as plt
     import matplotlib.dates as mdates
+
     _mpl_available = True
 except ImportError:
     pass
@@ -53,6 +56,7 @@ def _bar(value: float, width: int = 20) -> str:
 # --------------------------------------------------------------------------- #
 # Console summary                                                              #
 # --------------------------------------------------------------------------- #
+
 
 class TerminalPlotter:
     """
@@ -158,6 +162,7 @@ class TerminalPlotter:
 # Matplotlib plots                                                             #
 # --------------------------------------------------------------------------- #
 
+
 class FilePlotter:
     """
     Periodically generates PNG plot files from buffered samples.
@@ -204,8 +209,12 @@ class FilePlotter:
     def _plot_attitude(self, samples: List[InstantSample]) -> None:
         s = self._decimate(samples)
         times = [x.timestamp for x in s]
-        rolls = [math.degrees(x.roll) if x.roll is not None else float("nan") for x in s]
-        pitches = [math.degrees(x.pitch) if x.pitch is not None else float("nan") for x in s]
+        rolls = [
+            math.degrees(x.roll) if x.roll is not None else float("nan") for x in s
+        ]
+        pitches = [
+            math.degrees(x.pitch) if x.pitch is not None else float("nan") for x in s
+        ]
 
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 5), sharex=True)
         ax1.plot(times, rolls, lw=0.8, color="steelblue")
@@ -224,7 +233,8 @@ class FilePlotter:
         s = self._decimate(samples)
         times = [x.timestamp for x in s]
         headings = [
-            math.degrees(x.heading) if x.heading is not None else float("nan") for x in s
+            math.degrees(x.heading) if x.heading is not None else float("nan")
+            for x in s
         ]
         cogs = [math.degrees(x.cog) if x.cog is not None else float("nan") for x in s]
 
@@ -243,12 +253,8 @@ class FilePlotter:
         import numpy as np
         from scipy import signal as sp_signal
 
-        rolls = [
-            x.roll for x in samples if x.roll is not None
-        ]
-        pitches = [
-            x.pitch for x in samples if x.pitch is not None
-        ]
+        rolls = [x.roll for x in samples if x.roll is not None]
+        pitches = [x.pitch for x in samples if x.pitch is not None]
         if len(rolls) < 16 or len(pitches) < 16:
             return
 
@@ -321,7 +327,6 @@ class FilePlotter:
         plt.close(fig)
 
     def _plot_roll_vs_wind(self, samples: List[InstantSample]) -> None:
-        import numpy as np
 
         awa = [
             math.degrees(x.wind_angle_apparent)
@@ -346,13 +351,8 @@ class FilePlotter:
         plt.close(fig)
 
     def _plot_pitch_vs_sog(self, samples: List[InstantSample]) -> None:
-        import numpy as np
 
-        sog = [
-            x.sog
-            for x in samples
-            if x.sog is not None and x.pitch is not None
-        ]
+        sog = [x.sog for x in samples if x.sog is not None and x.pitch is not None]
         pitch_vals = [
             math.degrees(abs(x.pitch))
             for x in samples

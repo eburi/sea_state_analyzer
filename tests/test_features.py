@@ -1,4 +1,5 @@
 """Tests for feature extraction: derivatives, angle unwrapping, PSD."""
+
 from __future__ import annotations
 
 import math
@@ -19,7 +20,6 @@ from feature_extractor import (
     _spectral_energy_bands,
     _regime_label,
     _estimate_encounter_direction,
-    _estimate_regularity,
 )
 from models import InstantSample, WindowFeatures
 from datetime import datetime, timezone, timedelta
@@ -54,6 +54,7 @@ def _sample(
 # Angle unwrapping                                                            #
 # --------------------------------------------------------------------------- #
 
+
 def test_unwrap_no_wrap_needed():
     prev = 0.1
     curr = 0.2
@@ -87,6 +88,7 @@ def test_unwrap_first_sample():
 # Zero-crossing period estimation                                              #
 # --------------------------------------------------------------------------- #
 
+
 def test_zero_crossing_period_sine():
     """Sine wave at 0.1 Hz sampled at 2 Hz should give ~10 s period."""
     fs = 2.0
@@ -110,6 +112,7 @@ def test_zero_crossing_flat_signal():
 # --------------------------------------------------------------------------- #
 # Welch PSD dominant frequency                                                 #
 # --------------------------------------------------------------------------- #
+
 
 def test_welch_dominant_sine():
     """Dominant frequency should match the injected sine frequency."""
@@ -143,6 +146,7 @@ def test_welch_dominant_white_noise():
 # Spectral entropy                                                             #
 # --------------------------------------------------------------------------- #
 
+
 def test_spectral_entropy_flat():
     psd = np.ones(20)
     h = _spectral_entropy(psd)
@@ -166,6 +170,7 @@ def test_spectral_entropy_flat_gt_spike():
 # --------------------------------------------------------------------------- #
 # Derivative computation via FeatureExtractor                                  #
 # --------------------------------------------------------------------------- #
+
 
 def test_roll_rate_finite_difference():
     """roll_rate should match (roll[t] - roll[t-1]) / dt at sample rate."""
@@ -202,6 +207,7 @@ def test_heading_minus_cog():
 # Regime labels                                                                #
 # --------------------------------------------------------------------------- #
 
+
 def test_regime_labels():
     assert _regime_label(0.0) == "calm"
     assert _regime_label(0.1) == "calm"
@@ -214,6 +220,7 @@ def test_regime_labels():
 # --------------------------------------------------------------------------- #
 # Spectral bands                                                               #
 # --------------------------------------------------------------------------- #
+
 
 def test_spectral_energy_bands_sum_to_one():
     freqs = np.linspace(0, 1, 200)
@@ -259,10 +266,12 @@ def _make_wf(
 
 # -- Wind-angle-based classification tests --
 
+
 def test_direction_head_seas():
     """Wind from ahead (angle ~0) -> head_like."""
     wf = _make_wf(
-        roll_energy=0.005, pitch_energy=0.02,
+        roll_energy=0.005,
+        pitch_energy=0.02,
         wind_angle_mean=math.radians(10),
     )
     label, conf, roll_dom = _estimate_encounter_direction(wf)
@@ -274,7 +283,8 @@ def test_direction_head_seas():
 def test_direction_following_seas():
     """Wind from astern (angle ~180°) -> following_like."""
     wf = _make_wf(
-        roll_energy=0.005, pitch_energy=0.02,
+        roll_energy=0.005,
+        pitch_energy=0.02,
         wind_angle_mean=math.radians(170),
     )
     label, conf, _ = _estimate_encounter_direction(wf)
@@ -284,7 +294,8 @@ def test_direction_following_seas():
 def test_direction_following_seas_negative_angle():
     """Wind from astern on port side (angle ~ -170°) -> following_like."""
     wf = _make_wf(
-        roll_energy=0.005, pitch_energy=0.02,
+        roll_energy=0.005,
+        pitch_energy=0.02,
         wind_angle_mean=math.radians(-170),
     )
     label, conf, _ = _estimate_encounter_direction(wf)
@@ -298,7 +309,8 @@ def test_direction_aft_quarter_port():
     relative to bow is ~150° (wind from aft, slightly to port).
     """
     wf = _make_wf(
-        roll_energy=0.005, pitch_energy=0.015,
+        roll_energy=0.005,
+        pitch_energy=0.015,
         wind_angle_mean=math.radians(150),
     )
     label, conf, _ = _estimate_encounter_direction(wf)
@@ -308,7 +320,8 @@ def test_direction_aft_quarter_port():
 def test_direction_aft_quarter_starboard():
     """Waves from 30° off the starboard stern -> following_quartering_like."""
     wf = _make_wf(
-        roll_energy=0.005, pitch_energy=0.015,
+        roll_energy=0.005,
+        pitch_energy=0.015,
         wind_angle_mean=math.radians(-150),
     )
     label, conf, _ = _estimate_encounter_direction(wf)
@@ -318,7 +331,8 @@ def test_direction_aft_quarter_starboard():
 def test_direction_beam_seas():
     """Wind abeam (angle ~90°) -> beam_like."""
     wf = _make_wf(
-        roll_energy=0.02, pitch_energy=0.005,
+        roll_energy=0.02,
+        pitch_energy=0.005,
         wind_angle_mean=math.radians(90),
     )
     label, conf, roll_dom = _estimate_encounter_direction(wf)
@@ -329,7 +343,8 @@ def test_direction_beam_seas():
 def test_direction_head_quarter():
     """Wind from 45° off the bow -> head_quartering_like."""
     wf = _make_wf(
-        roll_energy=0.01, pitch_energy=0.015,
+        roll_energy=0.01,
+        pitch_energy=0.015,
         wind_angle_mean=math.radians(45),
     )
     label, conf, _ = _estimate_encounter_direction(wf)
@@ -340,14 +355,16 @@ def test_direction_spectral_consistency_boosts_confidence():
     """When spectral data agrees with wind angle, confidence is higher."""
     # Head seas with pitch-dominant energy (consistent)
     wf_consistent = _make_wf(
-        roll_energy=0.005, pitch_energy=0.02,
+        roll_energy=0.005,
+        pitch_energy=0.02,
         wind_angle_mean=math.radians(10),
     )
     _, conf_good, _ = _estimate_encounter_direction(wf_consistent)
 
     # Head seas with roll-dominant energy (inconsistent)
     wf_inconsistent = _make_wf(
-        roll_energy=0.02, pitch_energy=0.005,
+        roll_energy=0.02,
+        pitch_energy=0.005,
         wind_angle_mean=math.radians(10),
     )
     _, conf_bad, _ = _estimate_encounter_direction(wf_inconsistent)
@@ -358,14 +375,16 @@ def test_direction_spectral_consistency_boosts_confidence():
 def test_direction_high_wind_angle_var_reduces_confidence():
     """High wind angle variance should lower confidence."""
     wf_stable = _make_wf(
-        roll_energy=0.01, pitch_energy=0.01,
+        roll_energy=0.01,
+        pitch_energy=0.01,
         wind_angle_mean=math.radians(90),
         wind_angle_var=0.05,
     )
     _, conf_stable, _ = _estimate_encounter_direction(wf_stable)
 
     wf_variable = _make_wf(
-        roll_energy=0.01, pitch_energy=0.01,
+        roll_energy=0.01,
+        pitch_energy=0.01,
         wind_angle_mean=math.radians(90),
         wind_angle_var=1.0,
     )
@@ -375,6 +394,7 @@ def test_direction_high_wind_angle_var_reduces_confidence():
 
 
 # -- Spectral-only fallback tests (no wind angle) --
+
 
 def test_direction_fallback_beam():
     """Strong roll energy, no wind -> beam_like."""

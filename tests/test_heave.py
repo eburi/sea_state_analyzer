@@ -8,6 +8,7 @@ Tests are grouped:
   4. Combined estimate_waves_from_accel
   5. Integration with FeatureExtractor and SignalK publisher
 """
+
 from __future__ import annotations
 
 import math
@@ -20,7 +21,6 @@ from heave_estimator import (
     GRAVITY,
     KalmanHeaveEstimator,
     TrochoidalEstimate,
-    WaveEstimate,
     WavePartition,
     butterworth_lowpass,
     estimate_waves_from_accel,
@@ -31,6 +31,7 @@ from heave_estimator import (
 # --------------------------------------------------------------------------- #
 # Helpers                                                                      #
 # --------------------------------------------------------------------------- #
+
 
 def _generate_trochoidal_accel(
     frequency_hz: float,
@@ -63,8 +64,13 @@ def _generate_trochoidal_accel(
 
     effective_speed = c + delta_v
     t = np.arange(0, duration_s, 1.0 / fs)
-    accel = amplitude_m * k * k * effective_speed * effective_speed * np.cos(
-        k * effective_speed * t
+    accel = (
+        amplitude_m
+        * k
+        * k
+        * effective_speed
+        * effective_speed
+        * np.cos(k * effective_speed * t)
     )
     if noise_std > 0:
         accel += np.random.default_rng(42).normal(0, noise_std, len(t))
@@ -75,8 +81,8 @@ def _generate_trochoidal_accel(
 # 1. Trochoidal wave height estimation                                         #
 # --------------------------------------------------------------------------- #
 
-class TestTrochoidalWaveHeight:
 
+class TestTrochoidalWaveHeight:
     def test_returns_none_for_zero_frequency(self) -> None:
         assert trochoidal_wave_height(1.0, 0.0) is None
 
@@ -208,8 +214,8 @@ class TestTrochoidalWaveHeight:
 # 2. Kalman heave estimator                                                    #
 # --------------------------------------------------------------------------- #
 
-class TestKalmanHeaveEstimator:
 
+class TestKalmanHeaveEstimator:
     def test_create_default(self) -> None:
         kf = KalmanHeaveEstimator()
         assert kf.n_processed == 0
@@ -241,7 +247,6 @@ class TestKalmanHeaveEstimator:
     def test_sinusoidal_accel_gives_sinusoidal_heave(self) -> None:
         """Feed a pure sine wave and check heave oscillates."""
         dt = 0.02
-        fs = 1.0 / dt
         freq = 0.1  # 10s wave
         amplitude = 0.5  # m/s^2 peak accel
 
@@ -297,8 +302,8 @@ class TestKalmanHeaveEstimator:
 # 3. Butterworth low-pass filter                                               #
 # --------------------------------------------------------------------------- #
 
-class TestButterworthLowpass:
 
+class TestButterworthLowpass:
     def test_passthrough_when_cutoff_above_nyquist(self) -> None:
         data = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
         result = butterworth_lowpass(data, cutoff_hz=30.0, fs=50.0)
@@ -337,8 +342,8 @@ class TestButterworthLowpass:
 # 4. Combined estimate_waves_from_accel                                        #
 # --------------------------------------------------------------------------- #
 
-class TestEstimateWavesFromAccel:
 
+class TestEstimateWavesFromAccel:
     def test_returns_empty_for_too_few_samples(self) -> None:
         result = estimate_waves_from_accel(
             np.array([0.1, 0.2, 0.3]),
@@ -384,7 +389,9 @@ class TestEstimateWavesFromAccel:
             fs=50.0,
         )
         result = estimate_waves_from_accel(
-            accel, fs=50.0, kalman_estimator=kf,
+            accel,
+            fs=50.0,
+            kalman_estimator=kf,
         )
         assert result.kalman is not None
         assert result.significant_height is not None
@@ -409,7 +416,10 @@ class TestEstimateWavesFromAccel:
 
     def test_accel_rms_computed(self) -> None:
         accel = _generate_trochoidal_accel(
-            frequency_hz=0.1, amplitude_m=0.5, duration_s=30, fs=50.0,
+            frequency_hz=0.1,
+            amplitude_m=0.5,
+            duration_s=30,
+            fs=50.0,
         )
         result = estimate_waves_from_accel(accel, fs=50.0)
         assert result.accel_rms is not None
@@ -418,7 +428,10 @@ class TestEstimateWavesFromAccel:
     def test_doppler_delta_v_passed_through(self) -> None:
         """delta_v should influence the trochoidal estimate."""
         accel = _generate_trochoidal_accel(
-            frequency_hz=0.1, amplitude_m=0.5, duration_s=60, fs=50.0,
+            frequency_hz=0.1,
+            amplitude_m=0.5,
+            duration_s=60,
+            fs=50.0,
         )
         r_no_dop = estimate_waves_from_accel(accel, fs=50.0, delta_v=0.0)
         r_head = estimate_waves_from_accel(accel, fs=50.0, delta_v=3.0)
@@ -445,7 +458,10 @@ class TestEstimateWavesFromAccel:
 
     def test_confidence_reported(self) -> None:
         accel = _generate_trochoidal_accel(
-            frequency_hz=0.1, amplitude_m=0.5, duration_s=60, fs=50.0,
+            frequency_hz=0.1,
+            amplitude_m=0.5,
+            duration_s=60,
+            fs=50.0,
         )
         result = estimate_waves_from_accel(accel, fs=50.0)
         assert result.confidence >= 0
@@ -465,7 +481,9 @@ class TestEstimateWavesFromAccel:
 
         # With freq_max_hz=1.0, should find the 0.2 Hz ocean wave
         result = estimate_waves_from_accel(
-            accel, fs=fs, freq_max_hz=1.0,
+            accel,
+            fs=fs,
+            freq_max_hz=1.0,
         )
         assert result.accel_dominant_freq is not None
         assert result.accel_dominant_freq < 1.0
@@ -485,7 +503,9 @@ class TestEstimateWavesFromAccel:
         # Even with freq_max_hz=25 (Nyquist), 1/f² weighting should still
         # find the 0.2 Hz ocean wave because displacement energy dominates
         result = estimate_waves_from_accel(
-            accel, fs=fs, freq_max_hz=25.0,
+            accel,
+            fs=fs,
+            freq_max_hz=25.0,
         )
         assert result.accel_dominant_freq is not None
         assert result.accel_dominant_freq < 1.0
@@ -496,7 +516,7 @@ class TestEstimateWavesFromAccel:
         should now produce a trochoidal estimate."""
         # At 1 Hz, 0.3 m/s² peak accel gives ~7.6 mm amplitude
         # which would be rejected at min_amplitude=0.01 but accepted at 0.005
-        result_strict = trochoidal_wave_height(0.3, 1.0, min_amplitude=0.01)
+        trochoidal_wave_height(0.3, 1.0, min_amplitude=0.01)
         result_relaxed = trochoidal_wave_height(0.3, 1.0, min_amplitude=0.005)
         # The strict threshold may reject it; the relaxed one should accept
         assert result_relaxed is not None
@@ -517,7 +537,9 @@ class TestEstimateWavesFromAccel:
         accel = ocean + engine
 
         result = estimate_waves_from_accel(
-            accel, fs=fs, freq_max_hz=1.0,
+            accel,
+            fs=fs,
+            freq_max_hz=1.0,
             trochoidal_min_amplitude=0.005,
         )
         assert result.accel_dominant_freq is not None
@@ -531,16 +553,17 @@ class TestEstimateWavesFromAccel:
 # 5. Integration with FeatureExtractor                                         #
 # --------------------------------------------------------------------------- #
 
-class TestFeatureExtractorWaveIntegration:
 
+class TestFeatureExtractorWaveIntegration:
     def _make_sample(
         self,
         ts: datetime,
         roll: float = 0.0,
         pitch: float = 0.0,
         vertical_accel: float | None = None,
-    ) -> "InstantSample":
+    ) -> "InstantSample":  # noqa: F821
         from models import InstantSample
+
         return InstantSample(
             timestamp=ts,
             roll=roll,
@@ -551,6 +574,7 @@ class TestFeatureExtractorWaveIntegration:
     def test_add_imu_accel_method_exists(self) -> None:
         from config import Config
         from feature_extractor import FeatureExtractor
+
         fe = FeatureExtractor(Config())
         # Should not raise
         fe.add_imu_accel(0.1)
@@ -559,6 +583,7 @@ class TestFeatureExtractorWaveIntegration:
     def test_motion_estimate_has_wave_fields(self) -> None:
         """MotionEstimate should have wave height fields (even if None)."""
         from models import MotionEstimate
+
         me = MotionEstimate(
             timestamp=datetime.now(timezone.utc),
             window_s=60.0,
@@ -589,6 +614,7 @@ class TestFeatureExtractorWaveIntegration:
         freq = 0.1  # 10s wave
         base_ts = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
         from datetime import timedelta
+
         for i in range(n_samples):
             ts = base_ts + timedelta(milliseconds=i * 500)
             t = i / 2.0
@@ -601,7 +627,10 @@ class TestFeatureExtractorWaveIntegration:
 
         # Also feed 60s of accel data at 50 Hz
         accel = _generate_trochoidal_accel(
-            frequency_hz=freq, amplitude_m=0.5, duration_s=60, fs=50.0,
+            frequency_hz=freq,
+            amplitude_m=0.5,
+            duration_s=60,
+            fs=50.0,
         )
         for a in accel:
             fe.add_imu_accel(float(a))
@@ -613,7 +642,9 @@ class TestFeatureExtractorWaveIntegration:
             # At minimum, accel spectral info should be populated
             # (significant_height may or may not be populated depending
             # on the specific signal characteristics)
-            assert me.accel_dominant_freq is not None or me.significant_height is not None
+            assert (
+                me.accel_dominant_freq is not None or me.significant_height is not None
+            )
 
     def test_motion_estimate_includes_position_and_partition_fields(self) -> None:
         from config import Config
@@ -665,8 +696,8 @@ class TestFeatureExtractorWaveIntegration:
 # 6. Publisher integration                                                     #
 # --------------------------------------------------------------------------- #
 
-class TestPublisherWaveFields:
 
+class TestPublisherWaveFields:
     def test_publisher_includes_significant_height(self) -> None:
         from models import MotionEstimate
         from signalk_publisher import _motion_estimate_to_values
@@ -728,16 +759,17 @@ class TestPublisherWaveFields:
 # 7. Hull resonance suppression                                                #
 # --------------------------------------------------------------------------- #
 
-class TestHullResonanceSuppression:
 
+class TestHullResonanceSuppression:
     def _make_hull_params(
         self,
         resonant_period: float = 2.99,
         beam_resonant_period: float = 2.26,
         roll_period_range: tuple[float, float] = (2.0, 4.0),
         pitch_period_range: tuple[float, float] = (2.0, 4.0),
-    ) -> "HullParameters":
+    ) -> "HullParameters":  # noqa: F821
         from vessel_config import HullParameters, HullType
+
         return HullParameters(
             hull_type=HullType.CATAMARAN,
             resonant_period=resonant_period,
@@ -750,6 +782,7 @@ class TestHullResonanceSuppression:
 
     def test_suppression_function_exists(self) -> None:
         from heave_estimator import _hull_resonance_suppression
+
         assert callable(_hull_resonance_suppression)
 
     def test_no_hull_params_returns_unchanged(self) -> None:
@@ -825,7 +858,10 @@ class TestHullResonanceSuppression:
         freqs = np.linspace(0.01, 1.0, 100)
         psd = np.ones(100)
         result = _hull_resonance_suppression(
-            freqs, psd, hull, bandwidth_hz=0.0,
+            freqs,
+            psd,
+            hull,
+            bandwidth_hz=0.0,
         )
         np.testing.assert_array_equal(result, psd)
 
@@ -858,11 +894,15 @@ class TestHullResonanceSuppression:
         # Without hull suppression: should detect ~0.33 Hz (hull resonance
         # dominates even after 1/f² weighting because amplitude is 10x)
         result_no_hull = estimate_waves_from_accel(
-            accel, fs=fs, hull_params=None,
+            accel,
+            fs=fs,
+            hull_params=None,
         )
         # With hull suppression: should shift to ~0.125 Hz (ocean swell)
         result_with_hull = estimate_waves_from_accel(
-            accel, fs=fs, hull_params=hull_params,
+            accel,
+            fs=fs,
+            hull_params=hull_params,
         )
 
         assert result_no_hull.accel_dominant_freq is not None
@@ -893,7 +933,9 @@ class TestHullResonanceSuppression:
         hull_params = self._make_hull_params()
 
         result_no_hull = estimate_waves_from_accel(accel, fs=fs, hull_params=None)
-        result_with_hull = estimate_waves_from_accel(accel, fs=fs, hull_params=hull_params)
+        result_with_hull = estimate_waves_from_accel(
+            accel, fs=fs, hull_params=hull_params
+        )
 
         # Both should produce estimates
         hs_no = result_no_hull.significant_height
@@ -912,14 +954,16 @@ class TestHullResonanceSuppression:
 # 8. Spectral Hs (m0-based)                                                   #
 # --------------------------------------------------------------------------- #
 
-class TestSpectralHs:
 
+class TestSpectralHs:
     def test_spectral_hs_function_exists(self) -> None:
         from heave_estimator import _spectral_hs_from_displacement_psd
+
         assert callable(_spectral_hs_from_displacement_psd)
 
     def test_spectral_hs_zero_signal_returns_none(self) -> None:
         from heave_estimator import _spectral_hs_from_displacement_psd
+
         freqs = np.linspace(0.0, 25.0, 100)
         psd = np.zeros(100)
         result = _spectral_hs_from_displacement_psd(freqs, psd)
@@ -939,13 +983,19 @@ class TestSpectralHs:
         accel = accel_amplitude * np.sin(2 * math.pi * freq * t)
 
         from scipy import signal as scipy_signal
+
         nperseg = min(len(accel) // 2, 2048)
         freqs_psd, psd = scipy_signal.welch(
-            accel - np.mean(accel), fs=fs, nperseg=nperseg,
+            accel - np.mean(accel),
+            fs=fs,
+            nperseg=nperseg,
         )
 
         result = _spectral_hs_from_displacement_psd(
-            freqs_psd, psd, freq_min_hz=0.03, freq_max_hz=1.0,
+            freqs_psd,
+            psd,
+            freq_min_hz=0.03,
+            freq_max_hz=1.0,
         )
         assert result is not None
         assert result > 0
@@ -979,14 +1029,20 @@ class TestSpectralHs:
         # Single component
         single = 0.5 * np.sin(2 * math.pi * 0.1 * t)
         # Two components (more total energy)
-        multi = (0.5 * np.sin(2 * math.pi * 0.1 * t)
-                 + 0.3 * np.sin(2 * math.pi * 0.2 * t))
+        multi = 0.5 * np.sin(2 * math.pi * 0.1 * t) + 0.3 * np.sin(
+            2 * math.pi * 0.2 * t
+        )
 
         from scipy import signal as scipy_signal
+
         nperseg = min(len(single) // 2, 2048)
 
-        _, psd_single = scipy_signal.welch(single - np.mean(single), fs=fs, nperseg=nperseg)
-        f, psd_multi = scipy_signal.welch(multi - np.mean(multi), fs=fs, nperseg=nperseg)
+        _, psd_single = scipy_signal.welch(
+            single - np.mean(single), fs=fs, nperseg=nperseg
+        )
+        f, psd_multi = scipy_signal.welch(
+            multi - np.mean(multi), fs=fs, nperseg=nperseg
+        )
 
         hs_single = _spectral_hs_from_displacement_psd(f, psd_single)
         hs_multi = _spectral_hs_from_displacement_psd(f, psd_multi)
@@ -1017,11 +1073,15 @@ class TestSpectralHs:
 
     def test_empty_freq_band_returns_none(self) -> None:
         from heave_estimator import _spectral_hs_from_displacement_psd
+
         freqs = np.linspace(0.0, 25.0, 100)
         psd = np.ones(100)
         # Band with no valid frequencies
         result = _spectral_hs_from_displacement_psd(
-            freqs, psd, freq_min_hz=30.0, freq_max_hz=40.0,
+            freqs,
+            psd,
+            freq_min_hz=30.0,
+            freq_max_hz=40.0,
         )
         assert result is None
 
@@ -1030,8 +1090,8 @@ class TestSpectralHs:
 # 9. Multi-peak spectral partitions                                           #
 # --------------------------------------------------------------------------- #
 
-class TestWavePartitions:
 
+class TestWavePartitions:
     def test_partition_extraction_returns_components(self) -> None:
         fs = 50.0
         duration = 180.0
@@ -1039,9 +1099,9 @@ class TestWavePartitions:
 
         # Wind-wave + two swell systems
         signal = (
-            0.6 * np.sin(2 * math.pi * 0.32 * t)   # wind-wave (~3.1s)
-            + 0.9 * np.sin(2 * math.pi * 0.16 * t) # swell_1 (~6.3s)
-            + 0.7 * np.sin(2 * math.pi * 0.09 * t) # swell_2 (~11.1s)
+            0.6 * np.sin(2 * math.pi * 0.32 * t)  # wind-wave (~3.1s)
+            + 0.9 * np.sin(2 * math.pi * 0.16 * t)  # swell_1 (~6.3s)
+            + 0.7 * np.sin(2 * math.pi * 0.09 * t)  # swell_2 (~11.1s)
         )
 
         result = estimate_waves_from_accel(signal, fs=fs)
@@ -1073,7 +1133,11 @@ class TestWavePartitions:
         by_label = {p.component_type: p for p in result.spectral_partitions}
         assert "wind_wave" in by_label
         swells = sorted(
-            [p for p in result.spectral_partitions if p.component_type.startswith("swell_")],
+            [
+                p
+                for p in result.spectral_partitions
+                if p.component_type.startswith("swell_")
+            ],
             key=lambda x: x.peak_freq_hz,
             reverse=True,
         )

@@ -3,6 +3,7 @@
 All tunable parameters live here.  Module-level DEFAULT_CONFIG is used by
 callers that do not supply an explicit Config instance.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -34,9 +35,7 @@ class Config:
     # ------------------------------------------------------------------ #
     # Rolling windows                                                      #
     # ------------------------------------------------------------------ #
-    rolling_windows_s: List[int] = field(
-        default_factory=lambda: [10, 30, 60, 300]
-    )
+    rolling_windows_s: List[int] = field(default_factory=lambda: [10, 30, 60, 300])
 
     # ------------------------------------------------------------------ #
     # Data freshness                                                       #
@@ -85,7 +84,7 @@ class Config:
     # ------------------------------------------------------------------ #
     # Motion severity heuristic                                            #
     # ------------------------------------------------------------------ #
-    severity_roll_rms_max: float = 0.35    # rad  (~20 deg)
+    severity_roll_rms_max: float = 0.35  # rad  (~20 deg)
     severity_pitch_rms_max: float = 0.175  # rad  (~10 deg)
     severity_roll_spectral_max: float = 0.10
     severity_yaw_rate_var_max: float = 0.01
@@ -106,7 +105,7 @@ class Config:
     # ------------------------------------------------------------------ #
     # Rudder angle std threshold (rad) – above this the boat is manoeuvring
     # and Doppler correction is unreliable
-    doppler_rudder_std_max: float = 0.10   # ~5.7 deg
+    doppler_rudder_std_max: float = 0.10  # ~5.7 deg
 
     # Minimum depth (m) for deep-water assumption.  Deep-water requires
     # depth > wavelength/2.  This is a conservative floor: if mean depth is
@@ -119,18 +118,18 @@ class Config:
     # ------------------------------------------------------------------ #
     # IMU                                                                  #
     # ------------------------------------------------------------------ #
-    imu_enabled: bool = True          # attempt IMU init; False disables
-    imu_bus_number: int = 1           # i2c bus (RPi default = 1)
-    imu_auto_detect: bool = True      # scan I2C for known IMU chips
-    imu_address: int = 0x68           # fallback address if auto-detect off/fails
+    imu_enabled: bool = True  # attempt IMU init; False disables
+    imu_bus_number: int = 1  # i2c bus (RPi default = 1)
+    imu_auto_detect: bool = True  # scan I2C for known IMU chips
+    imu_address: int = 0x68  # fallback address if auto-detect off/fails
     imu_sample_rate_hz: float = 50.0  # target IMU poll rate
-    imu_include_mag: bool = True      # include magnetometer (slower)
+    imu_include_mag: bool = True  # include magnetometer (slower)
 
     # ------------------------------------------------------------------ #
     # Signal K publishing                                                  #
     # ------------------------------------------------------------------ #
-    publish_to_signalk: bool = True    # send wave estimates back to SK
-    publish_interval_s: float = 5.0   # seconds between publishes
+    publish_to_signalk: bool = True  # send wave estimates back to SK
+    publish_interval_s: float = 5.0  # seconds between publishes
     publish_source_label: str = "sea_state_analyzer"
 
     # ------------------------------------------------------------------ #
@@ -170,16 +169,18 @@ class Config:
     heave_kalman_pos_integral_trans_var: float = 1e-6
     heave_kalman_pos_trans_var: float = 1e-4
     heave_kalman_vel_trans_var: float = 1e-2
-    heave_kalman_pos_integral_obs_var: float = 1e+1
-    heave_kalman_bias_window: int = 5000   # samples (~100s at 50Hz) for accel bias estimate
+    heave_kalman_pos_integral_obs_var: float = 1e1
+    heave_kalman_bias_window: int = (
+        5000  # samples (~100s at 50Hz) for accel bias estimate
+    )
 
     # Low-pass filter: cutoff = dominant_freq * multiplier
     heave_lowpass_cutoff_mult: float = 8.0
 
     # PSD frequency search band for ocean waves (Hz).
     # Upper bound excludes engine vibration / high-freq noise from PSD peak.
-    heave_freq_min_hz: float = 0.03   # ~33 s period (long swell)
-    heave_freq_max_hz: float = 1.0    # ~1 s period (steep wind chop)
+    heave_freq_min_hz: float = 0.03  # ~33 s period (long swell)
+    heave_freq_max_hz: float = 1.0  # ~1 s period (steep wind chop)
 
     # Minimum amplitude (m) for trochoidal wave to be considered real.
     # 0.005 m = 5 mm — below this the model's precision is unreliable.

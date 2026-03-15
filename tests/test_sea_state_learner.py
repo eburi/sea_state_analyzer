@@ -1,11 +1,9 @@
 """Tests for sea_state_learner module: online learning, bin accumulation,
 correction factor computation, and persistence."""
+
 from __future__ import annotations
 
 import json
-import math
-import os
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -13,9 +11,6 @@ import pytest
 from sea_state_learner import (
     BinStats,
     SeaStateLearner,
-    PERIOD_BANDS,
-    DIRECTION_CATEGORIES,
-    MIN_OBSERVATIONS_FOR_CORRECTION,
     MAX_CORRECTION_FACTOR,
     MIN_CORRECTION_FACTOR,
     _period_band,
@@ -27,6 +22,7 @@ from sea_state_learner import (
 # ========================================================================= #
 # Period band classification                                                   #
 # ========================================================================= #
+
 
 class TestPeriodBand:
     """Tests for _period_band()."""
@@ -66,6 +62,7 @@ class TestPeriodBand:
 # Bin key                                                                      #
 # ========================================================================= #
 
+
 class TestBinKey:
     """Tests for _bin_key() and _parse_bin_key()."""
 
@@ -76,7 +73,10 @@ class TestBinKey:
         assert direction == "beam_like"
 
     def test_format(self) -> None:
-        assert _bin_key("short", "head_or_following_like") == "short:head_or_following_like"
+        assert (
+            _bin_key("short", "head_or_following_like")
+            == "short:head_or_following_like"
+        )
 
     def test_parse_invalid_raises(self) -> None:
         with pytest.raises(ValueError, match="Invalid bin key"):
@@ -86,6 +86,7 @@ class TestBinKey:
 # ========================================================================= #
 # BinStats                                                                     #
 # ========================================================================= #
+
 
 class TestBinStats:
     """Tests for BinStats running statistics."""
@@ -151,6 +152,7 @@ class TestBinStats:
 # SeaStateLearner: observe                                                     #
 # ========================================================================= #
 
+
 class TestSeaStateLearnerObserve:
     """Tests for SeaStateLearner.observe()."""
 
@@ -212,9 +214,11 @@ class TestSeaStateLearnerObserve:
     def test_observe_multiple_bins(self) -> None:
         """Different periods and directions go to different bins."""
         learner = SeaStateLearner()
-        learner.observe(3.0, "beam_like", 0.5, 1.0)       # short:beam_like
-        learner.observe(6.0, "beam_like", 0.5, 1.0)       # medium:beam_like
-        learner.observe(6.0, "head_or_following_like", 0.3, 0.8)  # medium:head_or_following_like
+        learner.observe(3.0, "beam_like", 0.5, 1.0)  # short:beam_like
+        learner.observe(6.0, "beam_like", 0.5, 1.0)  # medium:beam_like
+        learner.observe(
+            6.0, "head_or_following_like", 0.3, 0.8
+        )  # medium:head_or_following_like
         assert len(learner.bins) == 3
         assert learner.total_observations == 3
 
@@ -223,12 +227,11 @@ class TestSeaStateLearnerObserve:
 # SeaStateLearner: correction_factor                                           #
 # ========================================================================= #
 
+
 class TestSeaStateLearnerCorrection:
     """Tests for SeaStateLearner.correction_factor()."""
 
-    def _populate_learner(
-        self, learner: SeaStateLearner, n: int = 30
-    ) -> None:
+    def _populate_learner(self, learner: SeaStateLearner, n: int = 30) -> None:
         """Populate bins with enough data for corrections."""
         # Beam seas, medium period: vessel responds more
         for _ in range(n):
@@ -320,6 +323,7 @@ class TestSeaStateLearnerCorrection:
 # SeaStateLearner: persistence                                                 #
 # ========================================================================= #
 
+
 class TestSeaStateLearnerPersistence:
     """Tests for save/load functionality."""
 
@@ -351,9 +355,7 @@ class TestSeaStateLearnerPersistence:
 
     def test_load_wrong_version(self, tmp_path: Path) -> None:
         path = str(tmp_path / "wrong_version.json")
-        Path(path).write_text(
-            json.dumps({"version": 99, "bins": {}}), encoding="utf-8"
-        )
+        Path(path).write_text(json.dumps({"version": 99, "bins": {}}), encoding="utf-8")
         learner = SeaStateLearner(persist_path=path)
         assert learner.load() is False
 
@@ -414,6 +416,7 @@ class TestSeaStateLearnerPersistence:
 # SeaStateLearner: summary                                                     #
 # ========================================================================= #
 
+
 class TestSeaStateLearnerSummary:
     """Tests for summary output."""
 
@@ -439,6 +442,7 @@ class TestSeaStateLearnerSummary:
 # ========================================================================= #
 # FeatureExtractor integration with learner                                    #
 # ========================================================================= #
+
 
 class TestFeatureExtractorLearnerIntegration:
     """Tests for FeatureExtractor with learner (Phase 3 integration)."""
@@ -557,17 +561,20 @@ class TestFeatureExtractorLearnerIntegration:
 # Config field                                                                 #
 # ========================================================================= #
 
+
 class TestConfigLearnerField:
     """Tests for learner_persist_path config field."""
 
     def test_default_path(self) -> None:
         from pathlib import Path
         from config import Config
+
         cfg = Config()
         expected = str(Path.home() / ".sea_state_analyzer" / "vessel_rao.json")
         assert cfg.learner_persist_path == expected
 
     def test_overridable(self) -> None:
         from config import Config
+
         cfg = Config(learner_persist_path="/tmp/custom.json")
         assert cfg.learner_persist_path == "/tmp/custom.json"

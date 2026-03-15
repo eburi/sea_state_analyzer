@@ -1,4 +1,5 @@
 """Tests for rolling-window feature extraction."""
+
 from __future__ import annotations
 
 import math
@@ -51,6 +52,7 @@ def _make_samples(
 # Buffer sizes                                                                 #
 # --------------------------------------------------------------------------- #
 
+
 def test_buffer_fills_to_capacity():
     fs = 2.0
     config = Config(sample_rate_hz=fs, rolling_windows_s=[10])
@@ -78,6 +80,7 @@ def test_buffer_does_not_grow_beyond_maxlen():
 # --------------------------------------------------------------------------- #
 # RMS calculation                                                              #
 # --------------------------------------------------------------------------- #
+
 
 def test_roll_rms_sine_wave():
     """RMS of a sine wave with amplitude A should be A/sqrt(2)."""
@@ -124,6 +127,7 @@ def test_pitch_rms_constant():
 # Peak-to-peak                                                                 #
 # --------------------------------------------------------------------------- #
 
+
 def test_roll_p2p_sine():
     fs = 2.0
     config = Config(sample_rate_hz=fs, rolling_windows_s=[30])
@@ -148,6 +152,7 @@ def test_roll_p2p_sine():
 # --------------------------------------------------------------------------- #
 # PSD dominant frequency                                                       #
 # --------------------------------------------------------------------------- #
+
 
 def test_dominant_frequency_recovered():
     """Dominant frequency should match injected sine frequency."""
@@ -175,6 +180,7 @@ def test_dominant_frequency_recovered():
 # Insufficient data returns None                                               #
 # --------------------------------------------------------------------------- #
 
+
 def test_no_features_before_sufficient_data():
     config = Config(sample_rate_hz=2.0, rolling_windows_s=[30])
     fe = FeatureExtractor(config)
@@ -188,6 +194,7 @@ def test_no_features_before_sufficient_data():
 # --------------------------------------------------------------------------- #
 # Motion severity                                                              #
 # --------------------------------------------------------------------------- #
+
 
 def test_motion_severity_increases_with_roll():
     fs = 2.0
@@ -244,6 +251,7 @@ def test_calm_regime_label():
 # --------------------------------------------------------------------------- #
 # Yaw-rate variance                                                            #
 # --------------------------------------------------------------------------- #
+
 
 def test_yaw_rate_var_nonzero():
     fs = 2.0

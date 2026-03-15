@@ -1,10 +1,9 @@
 """Tests for vessel_config module: design data parsing, hull classification,
 physics computation, and Signal K fetch."""
+
 from __future__ import annotations
 
-import json
 import math
-import sys
 from typing import Tuple
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -36,6 +35,7 @@ TWO_PI = 2.0 * math.pi
 # ========================================================================= #
 # Hull type classification                                                     #
 # ========================================================================= #
+
 
 class TestClassifyHullType:
     """Tests for classify_hull_type()."""
@@ -75,6 +75,7 @@ class TestClassifyHullType:
 # VesselDesign properties                                                      #
 # ========================================================================= #
 
+
 class TestVesselDesign:
     """Tests for VesselDesign dataclass."""
 
@@ -112,6 +113,7 @@ class TestVesselDesign:
 # ========================================================================= #
 # Deep-water dispersion                                                        #
 # ========================================================================= #
+
 
 class TestDeepWaterDispersion:
     """Tests for wavelength_to_period and period_to_wavelength."""
@@ -166,6 +168,7 @@ class TestDeepWaterDispersion:
 # Natural period ranges                                                        #
 # ========================================================================= #
 
+
 class TestNaturalPeriodRanges:
     """Tests for hull-type-specific period ranges."""
 
@@ -203,6 +206,7 @@ class TestNaturalPeriodRanges:
 # ========================================================================= #
 # Severity weight/max overrides per hull type                                  #
 # ========================================================================= #
+
 
 class TestHullTypeSeverity:
     """Tests for hull-type severity weights and max overrides."""
@@ -248,7 +252,12 @@ class TestHullTypeSeverity:
         for ht in HullType:
             w = _hull_type_severity_weights(ht)
             assert len(w) == 4
-            assert set(w.keys()) == {"roll_rms", "pitch_rms", "roll_spectral", "yaw_rate_var"}
+            assert set(w.keys()) == {
+                "roll_rms",
+                "pitch_rms",
+                "roll_spectral",
+                "yaw_rate_var",
+            }
 
     def test_all_hull_types_have_four_max_overrides(self) -> None:
         for ht in HullType:
@@ -272,6 +281,7 @@ class TestHullTypeSeverity:
 # ========================================================================= #
 # compute_hull_parameters                                                      #
 # ========================================================================= #
+
 
 class TestComputeHullParameters:
     """Tests for compute_hull_parameters()."""
@@ -303,7 +313,9 @@ class TestComputeHullParameters:
 
         # Severity tuning
         assert params.severity_weights is not None
-        assert params.severity_weights["pitch_rms"] > params.severity_weights["roll_rms"]
+        assert (
+            params.severity_weights["pitch_rms"] > params.severity_weights["roll_rms"]
+        )
         assert params.severity_max_overrides is not None
 
     def test_monohull_40ft(self) -> None:
@@ -369,6 +381,7 @@ class TestComputeHullParameters:
 # ========================================================================= #
 # _parse_design_response (Signal K JSON)                                       #
 # ========================================================================= #
+
 
 class TestParseDesignResponse:
     """Tests for parsing Signal K /design endpoint responses."""
@@ -453,6 +466,7 @@ class TestParseDesignResponse:
 # ========================================================================= #
 # fetch_vessel_design (async, mocked HTTP)                                     #
 # ========================================================================= #
+
 
 def _make_mock_httpx_client(
     mock_resp: MagicMock,
@@ -543,9 +557,7 @@ class TestFetchVesselDesign:
 
         mock_httpx_mod, mock_client_inst = _make_mock_httpx_client(mock_resp)
         with patch.dict("sys.modules", {"httpx": mock_httpx_mod}):
-            design = await fetch_vessel_design(
-                "http://test:3000", auth_token="tok123"
-            )
+            await fetch_vessel_design("http://test:3000", auth_token="tok123")
 
         # Verify auth header was passed
         call_kwargs = mock_client_inst.get.call_args
@@ -585,6 +597,7 @@ class TestFetchVesselDesign:
 # log_hull_parameters (smoke test)                                             #
 # ========================================================================= #
 
+
 class TestLogHullParameters:
     """Smoke tests for log_hull_parameters()."""
 
@@ -609,6 +622,7 @@ class TestLogHullParameters:
 # ========================================================================= #
 # Integration: end-to-end parse + compute                                     #
 # ========================================================================= #
+
 
 class TestEndToEnd:
     """Integration tests: parse Signal K response -> compute hull parameters."""
@@ -660,6 +674,7 @@ class TestEndToEnd:
 # Phase 2: RAO gain curve                                                      #
 # ========================================================================= #
 
+
 class TestRAOGain:
     """Tests for rao_gain() — Lorentzian resonance model."""
 
@@ -673,7 +688,9 @@ class TestRAOGain:
         design = VesselDesign(loa=12.0, beam=3.5, draft_max=2.0)
         return compute_hull_parameters(design)
 
-    def test_gain_at_resonance_peak_catamaran(self, catamaran_params: HullParameters) -> None:
+    def test_gain_at_resonance_peak_catamaran(
+        self, catamaran_params: HullParameters
+    ) -> None:
         """Gain at resonant period should be near the peak value (~1.25 for cat)."""
         t_res = catamaran_params.resonant_period
         assert t_res is not None
@@ -681,7 +698,9 @@ class TestRAOGain:
         # Conservative primary peak = 1.25, plus beam resonance contribution
         assert gain > 1.2
 
-    def test_gain_at_resonance_peak_monohull(self, monohull_params: HullParameters) -> None:
+    def test_gain_at_resonance_peak_monohull(
+        self, monohull_params: HullParameters
+    ) -> None:
         """Monohull peak gain should be lower than catamaran."""
         t_res = monohull_params.resonant_period
         assert t_res is not None
@@ -700,12 +719,16 @@ class TestRAOGain:
         gain_mono = rao_gain(t_mono, monohull_params)
         assert gain_cat > gain_mono
 
-    def test_gain_approaches_one_for_long_waves(self, catamaran_params: HullParameters) -> None:
+    def test_gain_approaches_one_for_long_waves(
+        self, catamaran_params: HullParameters
+    ) -> None:
         """Very long waves (T >> resonant_T): hull follows wave, gain -> 1."""
         gain_20s = rao_gain(20.0, catamaran_params)
         assert 0.9 < gain_20s < 1.3
 
-    def test_gain_attenuated_for_very_short_waves(self, catamaran_params: HullParameters) -> None:
+    def test_gain_attenuated_for_very_short_waves(
+        self, catamaran_params: HullParameters
+    ) -> None:
         """Very short waves (T << resonant_T): too short to excite hull."""
         t_res = catamaran_params.resonant_period
         assert t_res is not None
@@ -726,7 +749,9 @@ class TestRAOGain:
         for t in [0.1, 0.2, 0.3, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0]:
             assert rao_gain(t, catamaran_params) >= 0.1
 
-    def test_beam_resonance_secondary_peak(self, catamaran_params: HullParameters) -> None:
+    def test_beam_resonance_secondary_peak(
+        self, catamaran_params: HullParameters
+    ) -> None:
         """Gain at beam resonant period should show a secondary peak."""
         t_beam = catamaran_params.beam_resonant_period
         assert t_beam is not None
@@ -777,6 +802,7 @@ class TestRAOGain:
 # Phase 2: RAO confidence adjustment                                           #
 # ========================================================================= #
 
+
 class TestRAOConfidenceAdjustment:
     """Tests for rao_confidence_adjustment()."""
 
@@ -790,18 +816,24 @@ class TestRAOConfidenceAdjustment:
         design = VesselDesign(loa=12.0, beam=3.5, draft_max=2.0)
         return compute_hull_parameters(design)
 
-    def test_within_natural_period_boost(self, catamaran_params: HullParameters) -> None:
+    def test_within_natural_period_boost(
+        self, catamaran_params: HullParameters
+    ) -> None:
         """Period within natural roll range -> period boost > 1."""
         # Catamaran natural roll: 2-4s; midpoint = 3.0s
         period_boost, hs_penalty = rao_confidence_adjustment(3.0, catamaran_params)
         assert period_boost > 1.0
 
-    def test_within_natural_period_hs_penalty(self, catamaran_params: HullParameters) -> None:
+    def test_within_natural_period_hs_penalty(
+        self, catamaran_params: HullParameters
+    ) -> None:
         """Period within natural roll range -> Hs penalty < 1."""
         period_boost, hs_penalty = rao_confidence_adjustment(3.0, catamaran_params)
         assert hs_penalty < 1.0
 
-    def test_outside_natural_period_no_boost(self, catamaran_params: HullParameters) -> None:
+    def test_outside_natural_period_no_boost(
+        self, catamaran_params: HullParameters
+    ) -> None:
         """Period well outside natural range -> boost ≈ 1.0."""
         period_boost, hs_penalty = rao_confidence_adjustment(15.0, catamaran_params)
         # Outside range: no centrality boost (but RAO-gain penalty may still apply)
@@ -839,7 +871,9 @@ class TestRAOConfidenceAdjustment:
         pb_outside, _ = rao_confidence_adjustment(3.0, monohull_params)
         assert pb_natural > pb_outside
 
-    def test_high_rao_gain_extra_penalty(self, catamaran_params: HullParameters) -> None:
+    def test_high_rao_gain_extra_penalty(
+        self, catamaran_params: HullParameters
+    ) -> None:
         """When RAO gain > 1.2, extra Hs penalty is applied."""
         # At resonant period, gain is high -> extra penalty
         t_res = catamaran_params.resonant_period
@@ -862,6 +896,7 @@ class TestRAOConfidenceAdjustment:
 # ========================================================================= #
 # Phase 2: FeatureExtractor with hull params                                   #
 # ========================================================================= #
+
 
 class TestFeatureExtractorHullIntegration:
     """Tests for FeatureExtractor with hull_params (Phase 2 integration)."""
@@ -899,6 +934,7 @@ class TestFeatureExtractorHullIntegration:
         assert t_res is not None
 
         from datetime import datetime, timezone
+
         me = MotionEstimate(
             timestamp=datetime.now(timezone.utc),
             window_s=30.0,
@@ -1073,8 +1109,8 @@ class TestFeatureExtractorHullIntegration:
             timestamp=datetime.now(timezone.utc),
             window_s=30.0,
             n_samples=60,
-            roll_rms=0.05,    # ~2.9 degrees
-            pitch_rms=0.05,   # ~2.9 degrees
+            roll_rms=0.05,  # ~2.9 degrees
+            pitch_rms=0.05,  # ~2.9 degrees
             roll_spectral_energy=0.02,
             yaw_rate_var=0.005,
         )

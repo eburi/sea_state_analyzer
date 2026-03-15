@@ -11,12 +11,12 @@ excessive I/O and memory growth.  The JSONL file is flushed after each write.
 All timestamps are stored as UTC ISO-8601 strings and as float Unix epoch
 seconds for easy downstream use.
 """
+
 from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -45,6 +45,7 @@ def _ts_epoch(dt: Optional[datetime]) -> Optional[float]:
 # --------------------------------------------------------------------------- #
 # Row converters                                                               #
 # --------------------------------------------------------------------------- #
+
 
 def _sample_to_row(s: InstantSample) -> Dict[str, Any]:
     row: Dict[str, Any] = {
@@ -170,6 +171,7 @@ def _motion_estimate_to_event(me: MotionEstimate) -> Dict[str, Any]:
 # Recorder                                                                     #
 # --------------------------------------------------------------------------- #
 
+
 class Recorder:
     """
     Batched recorder for all pipeline outputs.
@@ -188,8 +190,7 @@ class Recorder:
 
         # Per-window-size feature file paths
         self._feature_paths: Dict[int, Path] = {
-            w: self._dir / f"features_{w}s.parquet"
-            for w in config.rolling_windows_s
+            w: self._dir / f"features_{w}s.parquet" for w in config.rolling_windows_s
         }
 
         # Batch buffers
@@ -316,9 +317,7 @@ class Recorder:
             logger.error("Failed to write Parquet to %s: %s", path, exc)
 
 
-def _align_schema(
-    table: pa.Table, target_schema: pa.Schema
-) -> pa.Table:
+def _align_schema(table: pa.Table, target_schema: pa.Schema) -> pa.Table:
     """Add missing columns (null-filled) to table so it matches target_schema."""
     for field in target_schema:
         if field.name not in table.schema.names:

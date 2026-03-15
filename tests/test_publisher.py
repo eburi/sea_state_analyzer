@@ -7,13 +7,13 @@ Tests cover:
 - Async publish via mock WebSocket
 - Config integration (publish_to_signalk env var)
 """
+
 from __future__ import annotations
 
-import asyncio
 import json
 from datetime import datetime, timezone
-from typing import Any, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -52,6 +52,7 @@ from paths import (
 # Fixtures                                                                     #
 # --------------------------------------------------------------------------- #
 
+
 def _make_estimate(**overrides: Any) -> MotionEstimate:
     """Create a MotionEstimate with sensible defaults for testing."""
     defaults = dict(
@@ -85,6 +86,7 @@ def _make_estimate(**overrides: Any) -> MotionEstimate:
 # --------------------------------------------------------------------------- #
 # Value extraction tests                                                       #
 # --------------------------------------------------------------------------- #
+
 
 class TestMotionEstimateToValues:
     def test_full_estimate_produces_values(self) -> None:
@@ -252,14 +254,15 @@ class TestMotionEstimateToValues:
         )
         values = _motion_estimate_to_values(me)
         by_path = {v["path"]: v["value"] for v in values}
-        assert by_path[WAVE_WIND_WAVE_HEIGHT] == 1.23   # 2 decimal places
-        assert by_path[WAVE_WIND_WAVE_PERIOD] == 5.7    # 1 decimal place
+        assert by_path[WAVE_WIND_WAVE_HEIGHT] == 1.23  # 2 decimal places
+        assert by_path[WAVE_WIND_WAVE_PERIOD] == 5.7  # 1 decimal place
         assert by_path[WAVE_WIND_WAVE_CONFIDENCE] == 0.79  # 2 decimal places
 
 
 # --------------------------------------------------------------------------- #
 # Delta message building tests                                                 #
 # --------------------------------------------------------------------------- #
+
 
 class TestBuildDeltaMessage:
     def test_returns_valid_json(self) -> None:
@@ -338,6 +341,7 @@ class TestBuildDeltaMessage:
 # Async publish tests                                                          #
 # --------------------------------------------------------------------------- #
 
+
 class TestPublishDelta:
     @pytest.fixture
     def mock_ws(self) -> AsyncMock:
@@ -367,7 +371,9 @@ class TestPublishDelta:
         mock_ws.send.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_publish_returns_false_on_send_error(self, mock_ws: AsyncMock) -> None:
+    async def test_publish_returns_false_on_send_error(
+        self, mock_ws: AsyncMock
+    ) -> None:
         mock_ws.send.side_effect = ConnectionError("Connection lost")
         me = _make_estimate()
         ok = await publish_delta(mock_ws, me)
@@ -377,7 +383,8 @@ class TestPublishDelta:
     async def test_publish_custom_context(self, mock_ws: AsyncMock) -> None:
         me = _make_estimate()
         await publish_delta(
-            mock_ws, me,
+            mock_ws,
+            me,
             self_context="vessels.urn:mrn:imo:mmsi:538071881",
             source_label="custom_source",
         )
@@ -391,32 +398,39 @@ class TestPublishDelta:
 # Config integration tests                                                     #
 # --------------------------------------------------------------------------- #
 
+
 class TestConfigPublish:
     def test_default_publish_enabled(self) -> None:
         from config import Config
+
         c = Config()
         assert c.publish_to_signalk is True
 
     def test_publish_disableable(self) -> None:
         from config import Config
+
         c = Config(publish_to_signalk=False)
         assert c.publish_to_signalk is False
 
     def test_default_publish_interval(self) -> None:
         from config import Config
+
         c = Config()
         assert c.publish_interval_s == 5.0
 
     def test_default_source_label(self) -> None:
         from config import Config
+
         c = Config()
         assert c.publish_source_label == "sea_state_analyzer"
 
     def test_from_env_publish_to_signalk(self) -> None:
         import os
+
         os.environ["SEA_STATE_PUBLISH_TO_SIGNALK"] = "false"
         try:
             from config import Config
+
             c = Config.from_env()
             assert c.publish_to_signalk is False
         finally:
@@ -427,11 +441,13 @@ class TestConfigPublish:
 # SignalKClient.send() tests                                                   #
 # --------------------------------------------------------------------------- #
 
+
 class TestSignalKClientSend:
     @pytest.mark.asyncio
     async def test_send_when_not_connected(self) -> None:
         from config import Config
         from signalk_client import SignalKClient
+
         client = SignalKClient(Config())
         ok = await client.send('{"test": true}')
         assert ok is False
@@ -440,6 +456,7 @@ class TestSignalKClientSend:
     async def test_send_when_connected(self) -> None:
         from config import Config
         from signalk_client import SignalKClient
+
         client = SignalKClient(Config())
         client._connected = True
         mock_ws = AsyncMock()
@@ -453,6 +470,7 @@ class TestSignalKClientSend:
     async def test_send_handles_exception(self) -> None:
         from config import Config
         from signalk_client import SignalKClient
+
         client = SignalKClient(Config())
         client._connected = True
         mock_ws = AsyncMock()
@@ -465,6 +483,7 @@ class TestSignalKClientSend:
 # --------------------------------------------------------------------------- #
 # Meta delta tests                                                             #
 # --------------------------------------------------------------------------- #
+
 
 class TestBuildMetaDelta:
     def test_returns_valid_json(self) -> None:
@@ -526,6 +545,7 @@ class TestBuildMetaDelta:
         parsed = json.loads(msg)
         meta = parsed["updates"][0]["meta"]
         from paths import WAVE_MOTION_SEVERITY
+
         sev = next(e for e in meta if e["path"] == WAVE_MOTION_SEVERITY)
         assert sev["value"]["units"] == "ratio"
         assert "displayScale" in sev["value"]
@@ -538,6 +558,7 @@ class TestBuildMetaDelta:
         parsed = json.loads(msg)
         meta = parsed["updates"][0]["meta"]
         from paths import WAVE_MOTION_REGIME
+
         regime = next(e for e in meta if e["path"] == WAVE_MOTION_REGIME)
         assert "enum" in regime["value"]
         assert "calm" in regime["value"]["enum"]
@@ -548,6 +569,7 @@ class TestBuildMetaDelta:
         parsed = json.loads(msg)
         meta = parsed["updates"][0]["meta"]
         from paths import WAVE_ENCOUNTER_DIRECTION
+
         direction = next(e for e in meta if e["path"] == WAVE_ENCOUNTER_DIRECTION)
         assert "enum" in direction["value"]
         assert "beam_like" in direction["value"]["enum"]
@@ -588,9 +610,15 @@ class TestBuildMetaDelta:
         meta = parsed["updates"][0]["meta"]
         paths = {e["path"] for e in meta}
         for p in [
-            WAVE_WIND_WAVE_HEIGHT, WAVE_WIND_WAVE_PERIOD, WAVE_WIND_WAVE_CONFIDENCE,
-            WAVE_SWELL_1_HEIGHT, WAVE_SWELL_1_PERIOD, WAVE_SWELL_1_CONFIDENCE,
-            WAVE_SWELL_2_HEIGHT, WAVE_SWELL_2_PERIOD, WAVE_SWELL_2_CONFIDENCE,
+            WAVE_WIND_WAVE_HEIGHT,
+            WAVE_WIND_WAVE_PERIOD,
+            WAVE_WIND_WAVE_CONFIDENCE,
+            WAVE_SWELL_1_HEIGHT,
+            WAVE_SWELL_1_PERIOD,
+            WAVE_SWELL_1_CONFIDENCE,
+            WAVE_SWELL_2_HEIGHT,
+            WAVE_SWELL_2_PERIOD,
+            WAVE_SWELL_2_CONFIDENCE,
         ]:
             assert p in paths, f"Missing meta for partition path {p}"
 

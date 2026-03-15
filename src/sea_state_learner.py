@@ -27,12 +27,13 @@ Usage
 
 Thread safety: not thread-safe; designed for single-task asyncio use.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import math
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -47,10 +48,10 @@ logger = logging.getLogger(__name__)
 # Upper bound is exclusive except for the last band.
 PERIOD_BANDS: List[Tuple[str, float, float]] = [
     ("very_short", 0.0, 2.0),
-    ("short",      2.0, 4.0),
-    ("medium",     4.0, 8.0),
-    ("long",       8.0, 14.0),
-    ("very_long",  14.0, float("inf")),
+    ("short", 2.0, 4.0),
+    ("medium", 4.0, 8.0),
+    ("long", 8.0, 14.0),
+    ("very_long", 14.0, float("inf")),
 ]
 
 # Encounter direction categories (from feature extractor)
@@ -97,12 +98,14 @@ def _parse_bin_key(key: str) -> Tuple[str, str]:
 # Bin statistics                                                               #
 # --------------------------------------------------------------------------- #
 
+
 @dataclass
 class BinStats:
     """Running statistics for a single sea-state bin.
 
     Uses Welford-style incremental mean/variance for numerical stability.
     """
+
     n: int = 0
     motion_rms_sum: float = 0.0
     motion_rms_sq_sum: float = 0.0
@@ -204,6 +207,7 @@ MIN_CORRECTION_FACTOR = 0.3
 # Sea State Learner                                                            #
 # --------------------------------------------------------------------------- #
 
+
 class SeaStateLearner:
     """Online learner that accumulates per-bin sea-state statistics.
 
@@ -268,7 +272,11 @@ class SeaStateLearner:
             return None
 
         # Normalise direction to known categories
-        direction = encounter_direction if encounter_direction in DIRECTION_CATEGORIES else "confused_like"
+        direction = (
+            encounter_direction
+            if encounter_direction in DIRECTION_CATEGORIES
+            else "confused_like"
+        )
 
         key = _bin_key(band, direction)
 
@@ -294,7 +302,9 @@ class SeaStateLearner:
 
         logger.debug(
             "SeaStateLearner: bin=%s n=%d ratio=%.3f",
-            key, self._bins[key].n, response_ratio,
+            key,
+            self._bins[key].n,
+            response_ratio,
         )
         return key
 
@@ -433,7 +443,9 @@ class SeaStateLearner:
             target.write_text(json.dumps(data, indent=2), encoding="utf-8")
             logger.info(
                 "SeaStateLearner: saved %d bins (%d total obs) to %s",
-                len(self._bins), self.total_observations, target,
+                len(self._bins),
+                self.total_observations,
+                target,
             )
             return True
         except Exception as exc:
@@ -490,7 +502,9 @@ class SeaStateLearner:
 
             logger.info(
                 "SeaStateLearner: loaded %d bins (%d total obs) from %s",
-                loaded, self.total_observations, target,
+                loaded,
+                self.total_observations,
+                target,
             )
             return True
         except Exception as exc:
