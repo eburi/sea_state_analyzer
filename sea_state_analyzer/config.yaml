@@ -1,13 +1,13 @@
-name: Boat Wave State
+name: Sea State Analyzer
 version: "0.1.0"
-slug: boat_wave_state
+slug: sea_state_analyzer
 description: >-
   Sea-state estimation from Signal K vessel data and onboard IMU.
   Connects to a Signal K server via WebSocket, ingests attitude/movement/wind
   data, auto-detects IMU accelerometer via I2C, and publishes wave estimates
   (height, period, direction) back to Signal K as environment.water.waves.*
   deltas.
-url: "https://github.com/erichburi/boat_state"
+url: "https://github.com/erichburi/sea_state_analyzer"
 arch:
   - aarch64
 init: false

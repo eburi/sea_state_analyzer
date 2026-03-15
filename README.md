@@ -1,4 +1,4 @@
-# boat_state – Signal K Wave State Monitor
+# sea_state_analyzer – Signal K Wave State Monitor
 
 A Python application that connects to a Signal K marine server, reads an
 onboard IMU (ICM-20948 accelerometer/gyroscope/magnetometer), estimates wave
@@ -37,7 +37,7 @@ src/
   main.py              – CLI entry point: live / inspect / replay modes
 tests/                 – pytest unit tests (494 tests)
 conftest.py            – adds src/ to sys.path for pytest
-boat_wave_state/       – Home Assistant App packaging (config.yaml, Dockerfile, run.sh)
+sea_state_analyzer/    – Home Assistant App packaging (config.yaml, Dockerfile, run.sh)
 ```
 
 ---
@@ -83,7 +83,7 @@ Live mode produces console output every 5 seconds:
 
 ```
 ╔══════════════════════════════════════════════════════════╗
-║  BoatState – Wave Motion Monitor   14:32:07 UTC    ║
+║  SeaState – Wave Motion Monitor   14:32:07 UTC    ║
 ╠══════════════════════════════════════════════════════════╣
 ║  ● CONNECTED      samples=  1234  rate=2.0Hz  reconnects=0
 ╠══════════════════════════════════════════════════════════╣
@@ -355,13 +355,13 @@ the Signal K App on a Raspberry Pi 5 running HAOS.
 
 ```bash
 # Copy files to HA host and rebuild
-bash boat_wave_state/deploy.sh root@192.168.46.222
+bash sea_state_analyzer/deploy.sh root@192.168.46.222
 
 # Rebuild and restart on HA
-ssh root@192.168.46.222 "ha apps rebuild local_boat_wave_state && ha apps start local_boat_wave_state"
+ssh root@192.168.46.222 "ha apps rebuild local_sea_state_analyzer && ha apps start local_sea_state_analyzer"
 ```
 
-The app packaging lives in `boat_wave_state/` with:
+The app packaging lives in `sea_state_analyzer/` with:
 - `config.yaml` — app metadata, device mappings (`/dev/i2c-1` for IMU)
 - `Dockerfile` — `ARG BUILD_FROM` / `FROM $BUILD_FROM` pattern
 - `run.sh` — entry point
@@ -372,7 +372,7 @@ The app packaging lives in `boat_wave_state/` with:
 - The only external dependency is Signal K's WebSocket delta API — no Signal K library imports, no plugin SDK.
 - All configuration lives in `config.py` and environment variables.
 - Single long-running async Python process.
-- Output files written to `/root/share/boat_wave_state/` on HA (mapped volume).
+- Output files written to `/root/share/sea_state_analyzer/` on HA (mapped volume).
 - JWT token persisted at `/data/signalk_token.json` for reconnection.
 - Graceful degradation: works on macOS without IMU (attitude-only estimation).
 
@@ -397,7 +397,7 @@ Both methods require **Doppler correction**: the boat moves relative to wave fro
 
 ### Current state vs bareboat-necessities approach
 
-What boat_state **implements**:
+What sea_state_analyzer **implements**:
 - Kalman-filtered heave estimation (double-integrated vertical acceleration with drift correction)
 - Trochoidal wave height model as cross-check
 - Doppler correction using STW and TWA to recover true wave period/wavelength
@@ -408,7 +408,7 @@ What boat_state **implements**:
 - Signal K publishing with meta deltas for dashboard integration
 - Position recording on every estimate for forecast comparison
 
-What boat_state is **missing** for full wave measurement:
+What sea_state_analyzer is **missing** for full wave measurement:
 - Wave direction estimation (requires cross-spectral analysis between roll/pitch/heave)
 - Aranovskiy online frequency estimator (currently using Welch PSD)
 - Swell vs wind-wave direction separation

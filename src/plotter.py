@@ -76,7 +76,7 @@ class TerminalPlotter:
         conn_str = "up" if status.connected else "down"
 
         lines = [
-            f"--- boat_state {now_str}Z conn={conn_str} "
+            f"--- sea_state {now_str}Z conn={conn_str} "
             f"samples={status.samples_produced} rate={status.sample_rate_hz:.1f}Hz "
             f"reconnects={status.reconnect_count}",
         ]

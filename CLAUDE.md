@@ -1,8 +1,8 @@
-# Copilot Instructions – boat_state
+# Copilot Instructions – sea_state_analyzer
 
 ## Project overview
 
-`boat_state` is a Python 3.11+ prototype that connects to a Signal K marine server (`http://primrose.local:3000`), ingests **vessel self data only**, and derives inferred sea-state motion proxies from onboard attitude, movement, and wind sensors.
+`sea_state_analyzer` is a Python 3.11+ prototype that connects to a Signal K marine server (`http://primrose.local:3000`), ingests **vessel self data only**, and derives inferred sea-state motion proxies from onboard attitude, movement, and wind sensors.
 
 > **Domain caution:** All outputs are *inferred motion proxies*, not direct wave measurements — for now. The goal is to progressively add actual wave estimation (height, true period, direction) as described below.
 

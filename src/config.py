@@ -129,7 +129,7 @@ class Config:
     # ------------------------------------------------------------------ #
     publish_to_signalk: bool = True    # send wave estimates back to SK
     publish_interval_s: float = 5.0   # seconds between publishes
-    publish_source_label: str = "boat_wave_state"
+    publish_source_label: str = "sea_state_analyzer"
 
     # ------------------------------------------------------------------ #
     # Signal K authentication                                              #
@@ -137,7 +137,7 @@ class Config:
     # Path to persist the device clientId and JWT token across restarts.
     auth_token_file: str = "/data/signalk_token.json"
     # Description shown in Signal K admin UI when requesting device access.
-    auth_device_description: str = "Boat Wave State monitor"
+    auth_device_description: str = "Sea State Analyzer"
     # How long to poll for user approval before giving up (seconds).
     auth_approval_timeout_s: float = 300.0
     # Interval between polling requests while waiting for approval.
@@ -213,7 +213,7 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
-        """Create a Config with overrides from BOAT_STATE_* environment variables.
+        """Create a Config with overrides from SEA_STATE_* environment variables.
 
         Used by the HA App entry point (run.sh) to pass options.json values
         into the Python process.  Any env var that is not set falls back to
@@ -222,7 +222,7 @@ class Config:
         import os
 
         def _env(key: str) -> str | None:
-            return os.environ.get(f"BOAT_STATE_{key}")
+            return os.environ.get(f"SEA_STATE_{key}")
 
         def _env_bool(key: str) -> bool | None:
             v = _env(key)

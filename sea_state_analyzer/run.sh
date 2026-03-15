@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-# HA App entry point for boat_wave_state.
+# HA App entry point for sea_state_analyzer.
 # Reads user configuration from /data/options.json and launches main.py.
 
 OPTIONS_FILE="/data/options.json"
@@ -20,7 +20,7 @@ LOG_LEVEL="info"
 
 # Parse options.json if it exists
 if [ -f "$OPTIONS_FILE" ]; then
-    echo "[boat_wave_state] Reading config from $OPTIONS_FILE"
+    echo "[sea_state_analyzer] Reading config from $OPTIONS_FILE"
 
     # Use python3 to parse JSON (jq may not be available)
     SIGNALK_URL=$(python3 -c "import json; print(json.load(open('$OPTIONS_FILE')).get('signalk_url', '$SIGNALK_URL'))")
@@ -34,31 +34,31 @@ if [ -f "$OPTIONS_FILE" ]; then
     ENABLE_PLOTS=$(python3 -c "import json; print(str(json.load(open('$OPTIONS_FILE')).get('enable_plots', False)).lower())")
     LOG_LEVEL=$(python3 -c "import json; print(json.load(open('$OPTIONS_FILE')).get('log_level', '$LOG_LEVEL'))")
 else
-    echo "[boat_wave_state] No options.json found, using defaults"
+    echo "[sea_state_analyzer] No options.json found, using defaults"
 fi
 
-echo "[boat_wave_state] Signal K URL:     $SIGNALK_URL"
-echo "[boat_wave_state] Sample rate:      $SAMPLE_RATE_HZ Hz"
-echo "[boat_wave_state] IMU enabled:      $IMU_ENABLED (auto_detect=$IMU_AUTO_DETECT, bus=$IMU_BUS_NUMBER)"
-echo "[boat_wave_state] IMU rate:         $IMU_SAMPLE_RATE_HZ Hz (mag=$IMU_INCLUDE_MAG)"
-echo "[boat_wave_state] Publish to SK:    $PUBLISH_TO_SIGNALK"
-echo "[boat_wave_state] Log level:        $LOG_LEVEL"
+echo "[sea_state_analyzer] Signal K URL:     $SIGNALK_URL"
+echo "[sea_state_analyzer] Sample rate:      $SAMPLE_RATE_HZ Hz"
+echo "[sea_state_analyzer] IMU enabled:      $IMU_ENABLED (auto_detect=$IMU_AUTO_DETECT, bus=$IMU_BUS_NUMBER)"
+echo "[sea_state_analyzer] IMU rate:         $IMU_SAMPLE_RATE_HZ Hz (mag=$IMU_INCLUDE_MAG)"
+echo "[sea_state_analyzer] Publish to SK:    $PUBLISH_TO_SIGNALK"
+echo "[sea_state_analyzer] Log level:        $LOG_LEVEL"
 
 # Export as environment variables for main.py to read
-export BOAT_STATE_SIGNALK_URL="$SIGNALK_URL"
-export BOAT_STATE_SAMPLE_RATE_HZ="$SAMPLE_RATE_HZ"
-export BOAT_STATE_IMU_ENABLED="$IMU_ENABLED"
-export BOAT_STATE_IMU_AUTO_DETECT="$IMU_AUTO_DETECT"
-export BOAT_STATE_IMU_BUS_NUMBER="$IMU_BUS_NUMBER"
-export BOAT_STATE_IMU_SAMPLE_RATE_HZ="$IMU_SAMPLE_RATE_HZ"
-export BOAT_STATE_IMU_INCLUDE_MAG="$IMU_INCLUDE_MAG"
-export BOAT_STATE_PUBLISH_TO_SIGNALK="$PUBLISH_TO_SIGNALK"
-export BOAT_STATE_ENABLE_PLOTS="$ENABLE_PLOTS"
-export BOAT_STATE_LOG_LEVEL="$LOG_LEVEL"
+export SEA_STATE_SIGNALK_URL="$SIGNALK_URL"
+export SEA_STATE_SAMPLE_RATE_HZ="$SAMPLE_RATE_HZ"
+export SEA_STATE_IMU_ENABLED="$IMU_ENABLED"
+export SEA_STATE_IMU_AUTO_DETECT="$IMU_AUTO_DETECT"
+export SEA_STATE_IMU_BUS_NUMBER="$IMU_BUS_NUMBER"
+export SEA_STATE_IMU_SAMPLE_RATE_HZ="$IMU_SAMPLE_RATE_HZ"
+export SEA_STATE_IMU_INCLUDE_MAG="$IMU_INCLUDE_MAG"
+export SEA_STATE_PUBLISH_TO_SIGNALK="$PUBLISH_TO_SIGNALK"
+export SEA_STATE_ENABLE_PLOTS="$ENABLE_PLOTS"
+export SEA_STATE_LOG_LEVEL="$LOG_LEVEL"
 
-# Output goes to /share/boat_wave_state/ so it's accessible from HA
-export BOAT_STATE_OUTPUT_DIR="/share/boat_wave_state"
-mkdir -p "$BOAT_STATE_OUTPUT_DIR"
+# Output goes to /share/sea_state_analyzer/ so it's accessible from HA
+export SEA_STATE_OUTPUT_DIR="/share/sea_state_analyzer"
+mkdir -p "$SEA_STATE_OUTPUT_DIR"
 
 # Build CLI args
 ARGS="live --url $SIGNALK_URL"
@@ -66,5 +66,5 @@ if [ "$ENABLE_PLOTS" = "true" ]; then
     ARGS="$ARGS --plots"
 fi
 
-echo "[boat_wave_state] Starting: python3 src/main.py $ARGS"
+echo "[sea_state_analyzer] Starting: python3 src/main.py $ARGS"
 exec python3 /app/src/main.py $ARGS

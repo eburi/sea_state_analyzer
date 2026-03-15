@@ -529,7 +529,7 @@ class TestConfigAuth:
 
     def test_default_auth_device_description(self) -> None:
         c = Config()
-        assert c.auth_device_description == "Boat Wave State monitor"
+        assert c.auth_device_description == "Sea State Analyzer"
 
     def test_default_auth_approval_timeout(self) -> None:
         c = Config()
@@ -552,12 +552,12 @@ class TestConfigAuth:
         assert c.auth_poll_interval_s == 2.0
 
     def test_from_env_auth_token_file(self) -> None:
-        os.environ["BOAT_STATE_AUTH_TOKEN_FILE"] = "/custom/path/token.json"
+        os.environ["SEA_STATE_AUTH_TOKEN_FILE"] = "/custom/path/token.json"
         try:
             c = Config.from_env()
             assert c.auth_token_file == "/custom/path/token.json"
         finally:
-            del os.environ["BOAT_STATE_AUTH_TOKEN_FILE"]
+            del os.environ["SEA_STATE_AUTH_TOKEN_FILE"]
 
 
 # --------------------------------------------------------------------------- #

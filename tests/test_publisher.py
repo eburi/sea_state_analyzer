@@ -294,7 +294,7 @@ class TestBuildDeltaMessage:
         me = _make_estimate()
         msg = build_delta_message(me)
         parsed = json.loads(msg)
-        assert parsed["updates"][0]["source"]["label"] == "boat_wave_state"
+        assert parsed["updates"][0]["source"]["label"] == "sea_state_analyzer"
 
     def test_timestamp_in_iso_format(self) -> None:
         me = _make_estimate(
@@ -410,17 +410,17 @@ class TestConfigPublish:
     def test_default_source_label(self) -> None:
         from config import Config
         c = Config()
-        assert c.publish_source_label == "boat_wave_state"
+        assert c.publish_source_label == "sea_state_analyzer"
 
     def test_from_env_publish_to_signalk(self) -> None:
         import os
-        os.environ["BOAT_STATE_PUBLISH_TO_SIGNALK"] = "false"
+        os.environ["SEA_STATE_PUBLISH_TO_SIGNALK"] = "false"
         try:
             from config import Config
             c = Config.from_env()
             assert c.publish_to_signalk is False
         finally:
-            del os.environ["BOAT_STATE_PUBLISH_TO_SIGNALK"]
+            del os.environ["SEA_STATE_PUBLISH_TO_SIGNALK"]
 
 
 # --------------------------------------------------------------------------- #

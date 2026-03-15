@@ -13,7 +13,7 @@ Delta format::
     {
       "context": "vessels.self",
       "updates": [{
-        "source": {"label": "boat_wave_state", "type": "signalk"},
+        "source": {"label": "sea_state_analyzer", "type": "signalk"},
         "timestamp": "2024-06-01T12:00:00Z",
         "values": [
           {"path": "environment.water.waves.motionSeverity", "value": 0.42},
@@ -141,7 +141,7 @@ def _motion_estimate_to_values(
 def build_delta_message(
     me: MotionEstimate,
     self_context: str = "vessels.self",
-    source_label: str = "boat_wave_state",
+    source_label: str = "sea_state_analyzer",
 ) -> Optional[str]:
     """Build a JSON delta message string from a MotionEstimate.
 
@@ -202,7 +202,7 @@ async def publish_delta(
     ws: Any,
     me: MotionEstimate,
     self_context: str = "vessels.self",
-    source_label: str = "boat_wave_state",
+    source_label: str = "sea_state_analyzer",
 ) -> bool:
     """Send a delta message for the given MotionEstimate via WebSocket.
 

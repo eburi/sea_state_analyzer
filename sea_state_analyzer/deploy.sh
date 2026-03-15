@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-# Deploy boat_wave_state HA App to a Home Assistant device.
+# Deploy sea_state_analyzer HA App to a Home Assistant device.
 #
 # Usage:
 #   ./deploy.sh [user@host]
@@ -9,12 +9,12 @@ set -e
 # Default target: root@192.168.46.222 (Primrose HA device)
 #
 # This script:
-# 1. Assembles a self-contained addon directory in /tmp/boat_wave_state_addon/
-# 2. Copies it to /addons/boat_wave_state/ on the HA device via scp
+# 1. Assembles a self-contained addon directory in /tmp/sea_state_analyzer_addon/
+# 2. Copies it to /addons/sea_state_analyzer/ on the HA device via scp
 # 3. Prints instructions for installing/rebuilding in HA
 
 TARGET="${1:-root@192.168.46.222}"
-ADDON_NAME="boat_wave_state"
+ADDON_NAME="sea_state_analyzer"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="/tmp/${ADDON_NAME}_addon"
@@ -54,7 +54,7 @@ echo ""
 echo "Next steps on Home Assistant:"
 echo "  1. Go to Settings → Apps → App Store"
 echo "  2. Click ⋮ (top right) → Check for updates / Reload"
-echo "  3. Find 'Boat Wave State' in the Local apps section"
+echo "  3. Find 'Sea State Analyzer' in the Local apps section"
 echo "  4. Click Install (first time) or Rebuild (update)"
 echo "  5. Configure Signal K URL and IMU settings"
 echo "  6. Start the app and check logs"

@@ -1,4 +1,4 @@
-# Python dependencies for boat_state HA App.
+# Python dependencies for sea_state_analyzer HA App.
 # numpy, scipy, pandas, matplotlib are installed via apk (Alpine packages)
 # for faster build and smaller image size on aarch64.
 
