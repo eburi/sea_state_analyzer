@@ -7,7 +7,7 @@ description: >-
   data, auto-detects IMU accelerometer via I2C, and publishes wave estimates
   (height, period, direction) back to Signal K as environment.water.waves.*
   deltas.
-url: "https://github.com/erichburi/sea_state_analyzer"
+url: "https://github.com/eburi/sea_state_analyzer"
 arch:
   - aarch64
 init: false
