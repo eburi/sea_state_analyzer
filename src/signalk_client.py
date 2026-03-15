@@ -116,6 +116,22 @@ class SignalKClient:
         else:
             logger.info("Auth token cleared")
 
+    async def reconnect(self) -> None:
+        """Force-close the current WebSocket to trigger a reconnect.
+
+        The run-loop will catch the closure and reconnect with the
+        current auth token in the ``Authorization`` header.  This is
+        needed when an auth token is obtained *after* the initial
+        connection was already established.
+        """
+        ws = self._ws
+        if ws is not None:
+            logger.info("Forcing WebSocket reconnect (auth token updated)")
+            try:
+                await ws.close()
+            except Exception:
+                pass
+
     async def send(self, message: str) -> bool:
         """Send a message through the active WebSocket.
 

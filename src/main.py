@@ -140,6 +140,9 @@ async def _live_mode(config: Config) -> None:
 
         Sets auth_ready on success, auth_failed on failure.  The
         _publish_loop waits on auth_ready before attempting sends.
+
+        After obtaining the token, forces a WebSocket reconnect so the
+        new connection includes the Authorization header.
         """
         if not (config.publish_to_signalk and _PUBLISHER_AVAILABLE and _AUTH_AVAILABLE):
             return
@@ -148,7 +151,8 @@ async def _live_mode(config: Config) -> None:
             auth = await ensure_auth_token(config)
             if auth and auth.token:
                 client.set_auth_token(auth.token)
-                logger.info("Authenticated — wave deltas will be published via WebSocket")
+                logger.info("Authenticated — forcing reconnect for authenticated WebSocket")
+                await client.reconnect()
                 auth_ready.set()
             else:
                 logger.warning(
