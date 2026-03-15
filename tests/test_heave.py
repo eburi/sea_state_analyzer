@@ -401,6 +401,78 @@ class TestEstimateWavesFromAccel:
         assert result.confidence >= 0
         assert result.accel_freq_confidence is not None
 
+    def test_freq_band_upper_bound_excludes_vibration(self) -> None:
+        """High-freq vibration (e.g. 5 Hz engine) should not be selected as
+        the dominant wave frequency when freq_max_hz caps the search band."""
+        fs = 50.0
+        duration = 60.0
+        t = np.arange(0, duration, 1.0 / fs)
+        # Ocean wave at 0.2 Hz with small amplitude
+        ocean = 0.3 * np.sin(2 * math.pi * 0.2 * t)
+        # Engine vibration at 5 Hz with larger amplitude
+        engine = 1.0 * np.sin(2 * math.pi * 5.0 * t)
+        accel = ocean + engine
+
+        # With freq_max_hz=1.0, should find the 0.2 Hz ocean wave
+        result = estimate_waves_from_accel(
+            accel, fs=fs, freq_max_hz=1.0,
+        )
+        assert result.accel_dominant_freq is not None
+        assert result.accel_dominant_freq < 1.0
+        # Should be near 0.2 Hz (allow some PSD bin width tolerance)
+        assert 0.1 < result.accel_dominant_freq < 0.5
+
+    def test_freq_band_without_upper_bound_finds_vibration(self) -> None:
+        """Without upper bound, PSD would find the 5 Hz vibration peak."""
+        fs = 50.0
+        duration = 60.0
+        t = np.arange(0, duration, 1.0 / fs)
+        ocean = 0.3 * np.sin(2 * math.pi * 0.2 * t)
+        engine = 1.0 * np.sin(2 * math.pi * 5.0 * t)
+        accel = ocean + engine
+
+        # With freq_max_hz=25 (Nyquist), should find the 5 Hz vibration
+        result = estimate_waves_from_accel(
+            accel, fs=fs, freq_max_hz=25.0,
+        )
+        assert result.accel_dominant_freq is not None
+        assert result.accel_dominant_freq > 3.0
+
+    def test_trochoidal_min_amplitude_lowered(self) -> None:
+        """With lower min_amplitude, small waves that were previously rejected
+        should now produce a trochoidal estimate."""
+        # At 1 Hz, 0.3 m/s² peak accel gives ~7.6 mm amplitude
+        # which would be rejected at min_amplitude=0.01 but accepted at 0.005
+        result_strict = trochoidal_wave_height(0.3, 1.0, min_amplitude=0.01)
+        result_relaxed = trochoidal_wave_height(0.3, 1.0, min_amplitude=0.005)
+        # The strict threshold may reject it; the relaxed one should accept
+        assert result_relaxed is not None
+        assert result_relaxed.significant_height > 0
+        # Verify it's a small wave
+        assert result_relaxed.significant_height < 0.05
+
+    def test_combined_freq_band_and_min_amplitude(self) -> None:
+        """End-to-end: ocean wave + vibration, with correct freq band and
+        relaxed amplitude threshold, should produce a trochoidal estimate."""
+        fs = 50.0
+        duration = 120.0
+        t = np.arange(0, duration, 1.0 / fs)
+        # Small ocean wave at 0.5 Hz (2s period), ~0.1 m/s² peak
+        ocean = 0.1 * np.sin(2 * math.pi * 0.5 * t)
+        # Engine vibration at 8 Hz, larger amplitude
+        engine = 0.5 * np.sin(2 * math.pi * 8.0 * t)
+        accel = ocean + engine
+
+        result = estimate_waves_from_accel(
+            accel, fs=fs, freq_max_hz=1.0,
+            trochoidal_min_amplitude=0.005,
+        )
+        assert result.accel_dominant_freq is not None
+        assert result.accel_dominant_freq < 1.0
+        # Should produce a trochoidal estimate for the small ocean wave
+        assert result.trochoidal is not None
+        assert result.significant_height is not None
+
 
 # --------------------------------------------------------------------------- #
 # 5. Integration with FeatureExtractor                                         #

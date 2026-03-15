@@ -67,6 +67,7 @@ def trochoidal_wave_height(
     accel_max_observed: float,
     frequency_hz: float,
     delta_v: float = 0.0,
+    min_amplitude: float = 0.005,
 ) -> Optional[TrochoidalEstimate]:
     """Estimate wave height from peak vertical acceleration and frequency.
 
@@ -89,6 +90,8 @@ def trochoidal_wave_height(
     delta_v : float
         Boat velocity component along wave direction (m/s).
         Positive = head seas.  Default 0.
+    min_amplitude : float
+        Minimum wave amplitude (m) to consider physically real.
 
     Returns
     -------
@@ -174,8 +177,8 @@ def trochoidal_wave_height(
     if amplitude > max_amplitude:
         amplitude = max_amplitude  # clamp
 
-    if amplitude < 0.01:
-        # Sub-centimetre -- not a real wave
+    if amplitude < min_amplitude:
+        # Below minimum threshold -- not a real wave
         return None
 
     # Significant wave height: for a regular monochromatic trochoidal wave,
@@ -484,6 +487,9 @@ def estimate_waves_from_accel(
     kalman_estimator: Optional[KalmanHeaveEstimator] = None,
     lowpass_cutoff_mult: float = 8.0,
     psd_min_samples: int = 32,
+    freq_min_hz: float = 0.03,
+    freq_max_hz: float = 1.0,
+    trochoidal_min_amplitude: float = 0.005,
 ) -> WaveEstimate:
     """Estimate wave height from a window of vertical acceleration data.
 
@@ -508,6 +514,13 @@ def estimate_waves_from_accel(
         Low-pass cutoff = dominant_freq * this multiplier.
     psd_min_samples : int
         Minimum samples for PSD computation.
+    freq_min_hz : float
+        Lower bound of ocean-wave frequency search band (Hz).
+    freq_max_hz : float
+        Upper bound of ocean-wave frequency search band (Hz).
+        Excludes engine vibration and high-freq noise from PSD peak.
+    trochoidal_min_amplitude : float
+        Minimum trochoidal wave amplitude (m) to consider real.
 
     Returns
     -------
@@ -540,8 +553,11 @@ def estimate_waves_from_accel(
     if psd.sum() == 0:
         return result
 
-    # Exclude DC and very low frequencies (< 0.03 Hz = 33s period)
-    valid_mask = freqs > 0.03
+    # Exclude frequencies outside the ocean-wave band.
+    # Lower bound (freq_min_hz) removes DC and infra-gravity noise.
+    # Upper bound (freq_max_hz) removes engine vibration / high-freq noise
+    # that would otherwise dominate the PSD peak at short wavelengths.
+    valid_mask = (freqs > freq_min_hz) & (freqs <= freq_max_hz)
     if not np.any(valid_mask):
         return result
 
@@ -569,9 +585,12 @@ def estimate_waves_from_accel(
     result.accel_max = accel_max
 
     # --- Trochoidal estimate --- #
-    troch = trochoidal_wave_height(accel_max, dom_freq, delta_v)
+    troch = trochoidal_wave_height(
+        accel_max, dom_freq, delta_v,
+        min_amplitude=trochoidal_min_amplitude,
+    )
     if troch is None:
-        logger.info(
+        logger.debug(
             "trochoidal=None: accel_max=%.4f, dom_freq=%.4f, delta_v=%.2f",
             accel_max, dom_freq, delta_v,
         )

@@ -145,6 +145,24 @@ class TerminalPlotter:
                 f"║  COMFORT     {_fmt(me.comfort_proxy, '.3f'):>8}  "
                 f"confidence={_fmt(me.overall_confidence, '.2f'):>6}",
             ]
+            # Wave height from accelerometer (if available)
+            if me.significant_height is not None:
+                hs_str = _fmt(me.significant_height, '.2f', 'm')
+                method = me.wave_height_method or "--"
+                conf_str = _fmt(me.wave_height_confidence, '.2f')
+                heave_str = _fmt(me.heave, '.3f', 'm') if me.heave is not None else "  --  "
+                lines.append(
+                    f"║  WAVES  Hs={hs_str:>7}  "
+                    f"heave={heave_str:>8}  "
+                    f"method={method:<10} "
+                    f"conf={conf_str:>5}"
+                )
+            if me.accel_dominant_period is not None:
+                period_str = _fmt(me.accel_dominant_period, '.1f', 's')
+                freq_str = _fmt(me.accel_dominant_freq, '.3f', 'Hz')
+                lines.append(
+                    f"║         T={period_str:>7}  freq={freq_str:>9}"
+                )
         else:
             lines.append("║  (computing motion estimates…)")
 

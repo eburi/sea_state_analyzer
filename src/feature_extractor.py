@@ -853,6 +853,9 @@ class FeatureExtractor:
             kalman_estimator=None,  # Kalman fed separately at IMU rate
             lowpass_cutoff_mult=self._config.heave_lowpass_cutoff_mult,
             psd_min_samples=min_samples,
+            freq_min_hz=self._config.heave_freq_min_hz,
+            freq_max_hz=self._config.heave_freq_max_hz,
+            trochoidal_min_amplitude=self._config.heave_trochoidal_min_amplitude,
         )
 
         # Overlay Kalman heave results if the filter has converged
@@ -878,7 +881,7 @@ class FeatureExtractor:
         self._latest_wave_estimate = wave_est
 
         # Log wave estimation result
-        logger.info(
+        logger.debug(
             "wave_est: samples=%d, accel_rms=%.4f, freq=%.3f, "
             "troch=%s, kalman=%s, Hs=%s, method=%s",
             len(accel_data),

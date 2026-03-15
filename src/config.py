@@ -144,6 +144,15 @@ class Config:
     # Low-pass filter: cutoff = dominant_freq * multiplier
     heave_lowpass_cutoff_mult: float = 8.0
 
+    # PSD frequency search band for ocean waves (Hz).
+    # Upper bound excludes engine vibration / high-freq noise from PSD peak.
+    heave_freq_min_hz: float = 0.03   # ~33 s period (long swell)
+    heave_freq_max_hz: float = 1.0    # ~1 s period (steep wind chop)
+
+    # Minimum amplitude (m) for trochoidal wave to be considered real.
+    # 0.005 m = 5 mm — below this the model's precision is unreliable.
+    heave_trochoidal_min_amplitude: float = 0.005
+
     # Minimum samples of vertical_accel in a window to attempt wave estimation
     heave_min_accel_samples: int = 32
 
