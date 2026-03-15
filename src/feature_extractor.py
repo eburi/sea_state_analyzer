@@ -403,10 +403,10 @@ class FeatureExtractor:
         # Vertical acceleration buffer for wave estimation (separate from
         # the main rolling buffers because accel arrives at IMU sample rate,
         # not at the canonical 2 Hz sample rate).
-        # We store (timestamp, vertical_accel) tuples.
         imu_fs = config.imu_sample_rate_hz
         self._accel_buf: Deque[float] = deque(maxlen=int(300 * imu_fs))
         self._accel_fs: float = imu_fs  # actual sample rate of accel data
+        self._imu_highrate_active: bool = False  # set True on first add_imu_accel
 
         # Kalman heave estimator (if heave module available)
         self._kalman_heave: Optional[Any] = None
@@ -436,8 +436,9 @@ class FeatureExtractor:
         features = self._compute_layer_a(sample)
         self._prev_sample = sample
 
-        # If this sample has vertical_accel data, buffer it for wave estimation
-        if sample.vertical_accel is not None:
+        # Buffer vertical_accel only when the high-rate IMU path is NOT
+        # active, to avoid double-counting (50 Hz + 2 Hz → wrong PSD).
+        if not self._imu_highrate_active and sample.vertical_accel is not None:
             self._accel_buf.append(sample.vertical_accel)
 
         return features
@@ -449,6 +450,7 @@ class FeatureExtractor:
         2 Hz sample rate.  This feeds the heave Kalman filter in real-time
         and accumulates data for periodic wave estimation.
         """
+        self._imu_highrate_active = True
         self._accel_buf.append(vertical_accel)
         if self._kalman_heave is not None:
             self._kalman_heave.update(vertical_accel)

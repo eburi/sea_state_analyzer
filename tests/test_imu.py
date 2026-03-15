@@ -248,6 +248,126 @@ class TestIMUSample:
         # |a| - g = g - g = 0 regardless of orientation
         assert abs(sample.vertical_accel) < 0.01
 
+    def test_vertical_accel_calibrated_level(self) -> None:
+        """With gravity calibrated along Z, vertical_accel uses dot product."""
+        # Gravity along Z (level mount)
+        sample = IMUSample(
+            timestamp=datetime.now(timezone.utc),
+            accel_x=0.0,
+            accel_y=0.0,
+            accel_z=_GRAVITY,
+            gyro_x=0.0,
+            gyro_y=0.0,
+            gyro_z=0.0,
+            _gravity_unit=(0.0, 0.0, 1.0),
+        )
+        assert abs(sample.vertical_accel) < 0.01
+
+    def test_vertical_accel_calibrated_level_with_heave(self) -> None:
+        """Calibrated level mount: heave adds to gravity axis."""
+        heave = 2.0  # m/s²
+        sample = IMUSample(
+            timestamp=datetime.now(timezone.utc),
+            accel_x=0.0,
+            accel_y=0.0,
+            accel_z=_GRAVITY + heave,
+            gyro_x=0.0,
+            gyro_y=0.0,
+            gyro_z=0.0,
+            _gravity_unit=(0.0, 0.0, 1.0),
+        )
+        assert abs(sample.vertical_accel - heave) < 0.01
+
+    def test_vertical_accel_calibrated_sideways_at_rest(self) -> None:
+        """IMU mounted sideways (gravity along X): at rest should be ~0."""
+        sample = IMUSample(
+            timestamp=datetime.now(timezone.utc),
+            accel_x=_GRAVITY,
+            accel_y=0.0,
+            accel_z=0.0,
+            gyro_x=0.0,
+            gyro_y=0.0,
+            gyro_z=0.0,
+            _gravity_unit=(1.0, 0.0, 0.0),
+        )
+        assert abs(sample.vertical_accel) < 0.01
+
+    def test_vertical_accel_calibrated_sideways_with_heave(self) -> None:
+        """IMU mounted sideways (gravity along X): heave adds to X axis.
+
+        This is the critical test case.  Without calibration, |a|-g badly
+        underestimates heave when the IMU is mounted at 90°.  With the
+        gravity unit vector, the dot product correctly extracts the heave.
+        """
+        heave = 2.0  # m/s² upward
+        # At rest: accel_x = g.  With upward heave: accel_x = g + heave
+        # (heave adds to gravity direction)
+        sample = IMUSample(
+            timestamp=datetime.now(timezone.utc),
+            accel_x=_GRAVITY + heave,
+            accel_y=0.0,
+            accel_z=0.0,
+            gyro_x=0.0,
+            gyro_y=0.0,
+            gyro_z=0.0,
+            _gravity_unit=(1.0, 0.0, 0.0),
+        )
+        # Calibrated: dot((g+heave,0,0), (1,0,0)) - g = heave
+        assert abs(sample.vertical_accel - heave) < 0.01
+
+        # Without calibration (fallback): |a|-g = (g+heave)-g = heave
+        # (happens to work for pure-axis alignment, but fails with
+        #  lateral accel — see next test)
+        sample_uncal = IMUSample(
+            timestamp=datetime.now(timezone.utc),
+            accel_x=_GRAVITY + heave,
+            accel_y=0.0,
+            accel_z=0.0,
+            gyro_x=0.0,
+            gyro_y=0.0,
+            gyro_z=0.0,
+        )
+        assert abs(sample_uncal.vertical_accel - heave) < 0.01
+
+    def test_vertical_accel_sideways_with_lateral_accel(self) -> None:
+        """Sideways mount with lateral acceleration demonstrates the bug
+        that calibration fixes.
+
+        When the IMU is sideways (gravity along X) and a lateral
+        acceleration exists on Z (e.g. from roll), the uncalibrated
+        |a|-g overestimates heave because |a| increases with any
+        off-axis component.  The calibrated dot-product correctly
+        ignores the lateral component.
+        """
+        lateral = 3.0  # m/s² lateral (e.g. roll on a catamaran)
+        heave = 0.5  # m/s² heave
+
+        # Calibrated: correctly extracts only the gravity-axis component
+        sample_cal = IMUSample(
+            timestamp=datetime.now(timezone.utc),
+            accel_x=_GRAVITY + heave,  # gravity axis + heave
+            accel_y=0.0,
+            accel_z=lateral,  # lateral — should be ignored
+            gyro_x=0.0,
+            gyro_y=0.0,
+            gyro_z=0.0,
+            _gravity_unit=(1.0, 0.0, 0.0),
+        )
+        assert abs(sample_cal.vertical_accel - heave) < 0.01
+
+        # Uncalibrated: magnitude inflated by lateral component
+        sample_uncal = IMUSample(
+            timestamp=datetime.now(timezone.utc),
+            accel_x=_GRAVITY + heave,
+            accel_y=0.0,
+            accel_z=lateral,
+            gyro_x=0.0,
+            gyro_y=0.0,
+            gyro_z=0.0,
+        )
+        # |a| = sqrt((g+0.5)² + 3²) ≈ 10.74, |a|-g ≈ 0.93 (wrong!)
+        assert sample_uncal.vertical_accel > heave + 0.3  # demonstrates the error
+
     def test_mag_fields_optional(self) -> None:
         """Magnetometer fields default to None."""
         sample = IMUSample(
@@ -464,6 +584,248 @@ class TestIMUReader:
         reader.close()
         assert fake_bus.closed
 
+    # --- Gravity calibration tests ---
+
+    def test_initial_state_uncalibrated(self) -> None:
+        """Freshly constructed IMUReader should be uncalibrated."""
+        fake_bus = FakeSMBus(1)
+        driver = _ICM20948Driver.__new__(_ICM20948Driver)
+        driver._bus = fake_bus
+        driver._addr = 0x68
+        driver._current_bank = -1
+
+        reader = IMUReader(driver)
+        assert reader.is_calibrated is False
+        assert reader.gravity_unit is None
+
+    @pytest.mark.asyncio
+    async def test_calibrate_level_mount(self) -> None:
+        """calibrate() with gravity along Z should produce (0,0,1)."""
+        fake_bus = FakeSMBus(1)
+        # Default FakeSMBus: az=8192 (1g at ±4g) → accel_z ≈ 9.81
+        driver = _ICM20948Driver.__new__(_ICM20948Driver)
+        driver._bus = fake_bus
+        driver._addr = 0x68
+        driver._current_bank = -1
+
+        reader = IMUReader(driver)
+        grav = await reader.calibrate(duration_s=0.1, rate_hz=50.0)
+
+        assert reader.is_calibrated is True
+        gx, gy, gz = grav
+        # Should be approximately (0, 0, 1)
+        assert abs(gx) < 0.05
+        assert abs(gy) < 0.05
+        assert abs(gz - 1.0) < 0.05
+
+    @pytest.mark.asyncio
+    async def test_calibrate_sideways_mount(self) -> None:
+        """calibrate() with gravity along X should produce (~1,0,0)."""
+        fake_bus = FakeSMBus(1)
+        # 1g along X: ax=8192, ay=0, az=0 at ±4g
+        fake_bus.set_accel_gyro(8192, 0, 0, 0, 0, 0)
+        driver = _ICM20948Driver.__new__(_ICM20948Driver)
+        driver._bus = fake_bus
+        driver._addr = 0x68
+        driver._current_bank = -1
+
+        reader = IMUReader(driver)
+        grav = await reader.calibrate(duration_s=0.1, rate_hz=50.0)
+
+        assert reader.is_calibrated is True
+        gx, gy, gz = grav
+        assert abs(gx - 1.0) < 0.05
+        assert abs(gy) < 0.05
+        assert abs(gz) < 0.05
+
+    @pytest.mark.asyncio
+    async def test_calibrate_inverted_mount(self) -> None:
+        """calibrate() with gravity along -Z should produce (0,0,-1)."""
+        fake_bus = FakeSMBus(1)
+        # -1g along Z: az=-8192
+        fake_bus.set_accel_gyro(0, 0, -8192, 0, 0, 0)
+        driver = _ICM20948Driver.__new__(_ICM20948Driver)
+        driver._bus = fake_bus
+        driver._addr = 0x68
+        driver._current_bank = -1
+
+        reader = IMUReader(driver)
+        grav = await reader.calibrate(duration_s=0.1, rate_hz=50.0)
+
+        gx, gy, gz = grav
+        assert abs(gx) < 0.05
+        assert abs(gy) < 0.05
+        assert abs(gz + 1.0) < 0.05  # gz ≈ -1
+
+    @pytest.mark.asyncio
+    async def test_calibrate_diagonal_mount(self) -> None:
+        """calibrate() with gravity at 45° between X and Z."""
+        fake_bus = FakeSMBus(1)
+        # Equal gravity on X and Z: 1g * cos(45°) = 0.707g each
+        # At ±4g, LSB/g=8192 → 0.707*8192 ≈ 5793
+        val = int(8192 * math.cos(math.radians(45)))
+        fake_bus.set_accel_gyro(val, 0, val, 0, 0, 0)
+        driver = _ICM20948Driver.__new__(_ICM20948Driver)
+        driver._bus = fake_bus
+        driver._addr = 0x68
+        driver._current_bank = -1
+
+        reader = IMUReader(driver)
+        grav = await reader.calibrate(duration_s=0.1, rate_hz=50.0)
+
+        gx, gy, gz = grav
+        expected = 1.0 / math.sqrt(2.0)
+        assert abs(gx - expected) < 0.05
+        assert abs(gy) < 0.05
+        assert abs(gz - expected) < 0.05
+
+    @pytest.mark.asyncio
+    async def test_read_sample_injects_gravity_unit(self) -> None:
+        """After calibration, read_sample() should inject gravity_unit into IMUSample."""
+        fake_bus = FakeSMBus(1)
+        fake_bus.set_ext_sensor_data(struct.pack("<hhh", 100, 200, -50))
+        driver = _ICM20948Driver.__new__(_ICM20948Driver)
+        driver._bus = fake_bus
+        driver._addr = 0x68
+        driver._current_bank = -1
+
+        reader = IMUReader(driver)
+        # Calibrate first
+        await reader.calibrate(duration_s=0.1, rate_hz=50.0)
+        assert reader.is_calibrated
+
+        # Now read a sample
+        sample = await reader.read_sample()
+        assert sample._gravity_unit is not None
+        gx, gy, gz = sample._gravity_unit
+        # Default bus has gravity along Z
+        assert abs(gz - 1.0) < 0.1
+
+    @pytest.mark.asyncio
+    async def test_read_accel_gyro_only_injects_gravity_unit(self) -> None:
+        """After calibration, read_accel_gyro_only() should inject gravity_unit."""
+        fake_bus = FakeSMBus(1)
+        driver = _ICM20948Driver.__new__(_ICM20948Driver)
+        driver._bus = fake_bus
+        driver._addr = 0x68
+        driver._current_bank = -1
+
+        reader = IMUReader(driver)
+        await reader.calibrate(duration_s=0.1, rate_hz=50.0)
+
+        sample = await reader.read_accel_gyro_only()
+        assert sample._gravity_unit is not None
+
+    @pytest.mark.asyncio
+    async def test_uncalibrated_read_sample_no_gravity(self) -> None:
+        """Without calibration, read_sample() should have gravity_unit=None initially.
+
+        Note: After enough reads, _update_gravity will set it once
+        _grav_n hits a multiple of 50.
+        """
+        fake_bus = FakeSMBus(1)
+        fake_bus.set_ext_sensor_data(struct.pack("<hhh", 100, 200, -50))
+        driver = _ICM20948Driver.__new__(_ICM20948Driver)
+        driver._bus = fake_bus
+        driver._addr = 0x68
+        driver._current_bank = -1
+
+        reader = IMUReader(driver)
+        # First read: _grav_n goes from 0 to 1 (first sample initialises),
+        # then increments to 2.  Unit vector only recomputed at n%50==0.
+        sample = await reader.read_sample()
+        # After first read, _grav_n is 2, not a multiple of 50 yet
+        assert sample._gravity_unit is None
+
+    def test_update_gravity_first_sample_initialises(self) -> None:
+        """_update_gravity with first sample should initialise the sums."""
+        fake_bus = FakeSMBus(1)
+        driver = _ICM20948Driver.__new__(_ICM20948Driver)
+        driver._bus = fake_bus
+        driver._addr = 0x68
+        driver._current_bank = -1
+
+        reader = IMUReader(driver)
+        assert reader._grav_n == 0
+
+        reader._update_gravity(0.0, 0.0, _GRAVITY)
+        assert reader._grav_n == 2  # incremented from 0→set to 1, then +1
+        assert abs(reader._grav_sum_z - _GRAVITY) < 0.01
+
+    def test_update_gravity_progressive_refinement(self) -> None:
+        """_update_gravity should progressively refine toward the true direction.
+
+        After 50 calls (the recompute threshold), the gravity unit vector
+        should be set.
+        """
+        fake_bus = FakeSMBus(1)
+        driver = _ICM20948Driver.__new__(_ICM20948Driver)
+        driver._bus = fake_bus
+        driver._addr = 0x68
+        driver._current_bank = -1
+
+        reader = IMUReader(driver)
+
+        # Feed 50 samples with gravity along X (sideways mount)
+        for _ in range(50):
+            reader._update_gravity(_GRAVITY, 0.0, 0.0)
+
+        # At _grav_n=50 the unit vector should be recomputed
+        assert reader.is_calibrated
+        gx, gy, gz = reader.gravity_unit  # type: ignore[misc]
+        assert abs(gx - 1.0) < 0.01
+        assert abs(gy) < 0.01
+        assert abs(gz) < 0.01
+
+    def test_update_gravity_ema_tracks_slow_change(self) -> None:
+        """EMA should eventually track a slow orientation change.
+
+        Feed many samples along Z, then switch to X.  After enough samples
+        the gravity estimate should shift toward X.
+        """
+        fake_bus = FakeSMBus(1)
+        driver = _ICM20948Driver.__new__(_ICM20948Driver)
+        driver._bus = fake_bus
+        driver._addr = 0x68
+        driver._current_bank = -1
+
+        reader = IMUReader(driver)
+
+        # Seed along Z
+        for _ in range(100):
+            reader._update_gravity(0.0, 0.0, _GRAVITY)
+
+        assert reader.is_calibrated
+        _, _, gz_before = reader.gravity_unit  # type: ignore[misc]
+        assert gz_before > 0.9  # strongly along Z
+
+        # Now switch to X for many samples (simulating slow heel)
+        for _ in range(100000):
+            reader._update_gravity(_GRAVITY, 0.0, 0.0)
+
+        gx_after, _, gz_after = reader.gravity_unit  # type: ignore[misc]
+        # Should have shifted substantially toward X
+        assert gx_after > 0.5
+        assert gz_after < gz_before
+
+    def test_recompute_gravity_unit_zero_magnitude_safe(self) -> None:
+        """_recompute_gravity_unit should not crash with near-zero sums."""
+        fake_bus = FakeSMBus(1)
+        driver = _ICM20948Driver.__new__(_ICM20948Driver)
+        driver._bus = fake_bus
+        driver._addr = 0x68
+        driver._current_bank = -1
+
+        reader = IMUReader(driver)
+        reader._grav_sum_x = 0.0
+        reader._grav_sum_y = 0.0
+        reader._grav_sum_z = 0.0
+        reader._grav_n = 1
+
+        # Should not crash, and should not set gravity_unit
+        reader._recompute_gravity_unit()
+        assert reader.gravity_unit is None
+
 
 # --------------------------------------------------------------------------- #
 # InstantSample IMU field tests                                                #
@@ -590,3 +952,100 @@ class TestIMUMerge:
         # No merge
         assert sample.accel_x is None
         assert sample.vertical_accel is None
+
+
+# --------------------------------------------------------------------------- #
+# Double-count fix tests (_imu_highrate_active)                                #
+# --------------------------------------------------------------------------- #
+
+class TestIMUHighrateActiveFlag:
+    """Verify that the feature extractor doesn't double-count accel data.
+
+    When the high-rate IMU path (add_imu_accel at 50 Hz) is active,
+    add_sample() should NOT also buffer vertical_accel into _accel_buf.
+    """
+
+    def test_accel_buf_from_sample_when_no_imu(self) -> None:
+        """Without IMU, add_sample() should buffer vertical_accel."""
+        from config import Config
+        from feature_extractor import FeatureExtractor
+        from models import InstantSample
+
+        config = Config()
+        fe = FeatureExtractor(config)
+
+        assert fe._imu_highrate_active is False
+        assert len(fe._accel_buf) == 0
+
+        now = datetime.now(timezone.utc)
+        sample = InstantSample(timestamp=now)
+        sample.vertical_accel = 0.5
+        fe.add_sample(sample)
+
+        assert len(fe._accel_buf) == 1
+        assert fe._accel_buf[0] == 0.5
+
+    def test_accel_buf_blocked_when_imu_active(self) -> None:
+        """Once add_imu_accel is called, add_sample() must not buffer accel."""
+        from config import Config
+        from feature_extractor import FeatureExtractor
+        from models import InstantSample
+
+        config = Config()
+        fe = FeatureExtractor(config)
+
+        # Activate high-rate path
+        fe.add_imu_accel(0.1)
+        assert fe._imu_highrate_active is True
+        assert len(fe._accel_buf) == 1  # from add_imu_accel
+
+        # Now add_sample with vertical_accel should NOT add to _accel_buf
+        now = datetime.now(timezone.utc)
+        sample = InstantSample(timestamp=now)
+        sample.vertical_accel = 0.5
+        fe.add_sample(sample)
+
+        # Buffer should still only have the 1 sample from add_imu_accel
+        assert len(fe._accel_buf) == 1
+
+    def test_add_imu_accel_buffers_correctly(self) -> None:
+        """add_imu_accel should always buffer regardless of flag state."""
+        from config import Config
+        from feature_extractor import FeatureExtractor
+
+        config = Config()
+        fe = FeatureExtractor(config)
+
+        for i in range(10):
+            fe.add_imu_accel(float(i) * 0.1)
+
+        assert len(fe._accel_buf) == 10
+        assert fe._imu_highrate_active is True
+
+    def test_no_double_count_sequence(self) -> None:
+        """Realistic sequence: IMU accel at 50 Hz + samples at 2 Hz.
+
+        Only the 50 Hz data should end up in _accel_buf.
+        """
+        from config import Config
+        from feature_extractor import FeatureExtractor
+        from models import InstantSample
+
+        config = Config()
+        fe = FeatureExtractor(config)
+
+        now = datetime.now(timezone.utc)
+
+        # Simulate 1 second: 50 IMU samples + 2 regular samples
+        for i in range(50):
+            fe.add_imu_accel(0.01 * i)
+            # Every 25 IMU samples, a 2 Hz sample arrives
+            if i % 25 == 0:
+                sample = InstantSample(timestamp=now)
+                sample.vertical_accel = 99.0  # distinctive value
+                fe.add_sample(sample)
+
+        # Should have exactly 50 from IMU, none from add_sample
+        assert len(fe._accel_buf) == 50
+        # The distinctive 99.0 should NOT be in the buffer
+        assert 99.0 not in list(fe._accel_buf)

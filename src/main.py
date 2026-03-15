@@ -232,6 +232,10 @@ async def _live_mode(config: Config) -> None:
         if imu_reader is not None:
             logger.info("IMU reader active (%s) – sampling at %.0f Hz",
                         imu_reader.chip_name, config.imu_sample_rate_hz)
+            # Seed gravity-direction estimate (10 s ≈ 1+ wave cycles).
+            # The estimate continues to refine with every subsequent read.
+            logger.info("Calibrating IMU mounting orientation (10 s)…")
+            await imu_reader.calibrate(duration_s=10.0, rate_hz=config.imu_sample_rate_hz)
         else:
             logger.info("IMU not available – continuing without accelerometer data")
     elif not _IMU_AVAILABLE:

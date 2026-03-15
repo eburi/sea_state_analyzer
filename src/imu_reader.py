@@ -92,7 +92,7 @@ class IMUSample:
     """A single timestamped reading from the ICM-20948."""
     timestamp: datetime
 
-    # Accelerometer (m/s²) — NED frame as mounted
+    # Accelerometer (m/s²) — IMU body frame
     accel_x: float
     accel_y: float
     accel_z: float
@@ -110,6 +110,10 @@ class IMUSample:
     # Die temperature (°C)
     temperature: Optional[float] = None
 
+    # Gravity unit vector in IMU body frame (set by calibration).
+    # When None, vertical_accel falls back to the |a|-g approximation.
+    _gravity_unit: Optional[Tuple[float, float, float]] = None
+
     @property
     def accel_magnitude(self) -> float:
         """Total acceleration magnitude in m/s²."""
@@ -121,18 +125,28 @@ class IMUSample:
     def vertical_accel(self) -> float:
         """Vertical (heave) acceleration component in m/s².
 
-        Uses ``|a| - g`` (total magnitude minus gravity) which is
-        orientation-independent.  This is always zero at rest regardless
-        of how the IMU is mounted.  Positive = upward acceleration
-        exceeding 1 g, negative = below 1 g (e.g. in free-fall or
-        at the crest of a wave).
+        When a calibrated gravity unit vector is available (from startup
+        calibration), this projects the accelerometer vector onto the
+        gravity direction and subtracts g::
 
-        Note: this is a scalar approximation.  For a truly stationary
-        sensor tilted at angle θ, ``|a| = g`` always, so the result
-        is 0 as expected.  In dynamic conditions with lateral
-        acceleration, some cross-axis contamination occurs, but for
-        ocean wave heave estimation this is acceptable.
+            vertical_accel = dot(accel, gravity_unit) - g
+
+        This works correctly regardless of IMU mounting orientation —
+        even when the IMU is mounted sideways or upside-down.
+
+        Without calibration, falls back to ``|a| - g`` which is only
+        accurate when lateral accelerations are small relative to g.
         """
+        if self._gravity_unit is not None:
+            gx, gy, gz = self._gravity_unit
+            # Dot product of accel vector with gravity unit vector
+            # gives the component along Earth's vertical axis.
+            # Positive = upward (away from gravity), so we negate
+            # the dot product (gravity points down, accel at rest
+            # points up) — actually, at rest accel = +g along gravity
+            # direction, so dot(accel, grav_unit) = +g at rest.
+            return (self.accel_x * gx + self.accel_y * gy
+                    + self.accel_z * gz) - _GRAVITY
         return self.accel_magnitude - _GRAVITY
 
 
@@ -350,6 +364,13 @@ class IMUReader:
         self._driver = driver
         self._chip_name = chip_name
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        # Gravity unit vector in IMU body frame (set by calibration).
+        self._gravity_unit: Optional[Tuple[float, float, float]] = None
+        # Running sums for progressive gravity estimation
+        self._grav_sum_x: float = 0.0
+        self._grav_sum_y: float = 0.0
+        self._grav_sum_z: float = 0.0
+        self._grav_n: int = 0
 
     @property
     def chip_name(self) -> str:
@@ -419,6 +440,108 @@ class IMUReader:
             logger.info("IMU not available: %s", exc)
             return None
 
+    @property
+    def is_calibrated(self) -> bool:
+        """True when the gravity direction has been calibrated."""
+        return self._gravity_unit is not None
+
+    @property
+    def gravity_unit(self) -> Optional[Tuple[float, float, float]]:
+        """Gravity unit vector in IMU body frame, or None if uncalibrated."""
+        return self._gravity_unit
+
+    async def calibrate(
+        self,
+        duration_s: float = 2.0,
+        rate_hz: float = 50.0,
+    ) -> Tuple[float, float, float]:
+        """Seed gravity estimate with a short burst of readings.
+
+        Collects *duration_s* seconds of accelerometer readings at
+        *rate_hz* and averages them to get an initial gravity estimate.
+        This is called once at startup; subsequent readings continue to
+        refine the estimate via :meth:`_update_gravity`.
+
+        Over many wave cycles the oscillatory accelerations average to
+        zero, so the mean converges to the true gravity vector regardless
+        of sea state.  Even a short burst gives a usable direction when
+        the IMU is mounted at ~90° — the dominant axis is unmistakable.
+
+        Returns the gravity unit vector ``(gx, gy, gz)``.
+        """
+        loop = self._loop or asyncio.get_running_loop()
+        interval = 1.0 / rate_hz
+        n_samples = int(duration_s * rate_hz)
+
+        for _ in range(n_samples):
+            try:
+                ax, ay, az, _, _, _ = await loop.run_in_executor(
+                    None, self._driver.read_accel_gyro
+                )
+                self._grav_sum_x += ax
+                self._grav_sum_y += ay
+                self._grav_sum_z += az
+                self._grav_n += 1
+            except Exception:
+                pass
+            await asyncio.sleep(interval)
+
+        self._recompute_gravity_unit()
+        return self._gravity_unit or (0.0, 0.0, -1.0)
+
+    def _update_gravity(self, ax: float, ay: float, az: float) -> None:
+        """Incorporate a new accel reading into the running gravity estimate.
+
+        Called on every IMU read (50 Hz).  Over many wave cycles the
+        oscillatory component averages out, progressively refining the
+        gravity direction.  Uses exponential weighting with a half-life
+        of ~300 s (15 000 samples at 50 Hz) so the estimate tracks slow
+        orientation changes (e.g. heel under sail) but remains stable
+        against wave-frequency noise.
+        """
+        # Exponential decay factor: alpha = 1 - exp(-1/(halflife_samples))
+        # With halflife = 15000 samples (~5 min at 50 Hz):
+        #   alpha ≈ 6.67e-5, so (1-alpha)^15000 ≈ 0.5
+        _ALPHA = 6.67e-5
+
+        if self._grav_n == 0:
+            # First sample ever — initialise
+            self._grav_sum_x = ax
+            self._grav_sum_y = ay
+            self._grav_sum_z = az
+            self._grav_n = 1
+        else:
+            # Exponential moving average
+            self._grav_sum_x = (1.0 - _ALPHA) * self._grav_sum_x + _ALPHA * ax
+            self._grav_sum_y = (1.0 - _ALPHA) * self._grav_sum_y + _ALPHA * ay
+            self._grav_sum_z = (1.0 - _ALPHA) * self._grav_sum_z + _ALPHA * az
+
+        # Recompute unit vector every 50 samples (~1 Hz) to avoid
+        # sqrt on every call
+        if self._grav_n % 50 == 0:
+            self._recompute_gravity_unit()
+        self._grav_n += 1
+
+    def _recompute_gravity_unit(self) -> None:
+        """Normalise the running gravity sum into a unit vector."""
+        sx, sy, sz = self._grav_sum_x, self._grav_sum_y, self._grav_sum_z
+        mag = math.sqrt(sx * sx + sy * sy + sz * sz)
+        if mag < 0.1:
+            return  # not enough data yet
+        gx, gy, gz = sx / mag, sy / mag, sz / mag
+        prev = self._gravity_unit
+        self._gravity_unit = (gx, gy, gz)
+
+        # Log on first calibration or significant change
+        if prev is None:
+            tilt_deg = math.degrees(math.acos(min(1.0, max(-1.0, gz))))
+            logger.info(
+                "IMU gravity calibration: body-frame direction = "
+                "(%.3f, %.3f, %.3f), tilt from chip Z = %.1f° "
+                "(%d samples)",
+                gx, gy, gz, tilt_deg, self._grav_n,
+            )
+
     async def read_sample(self) -> IMUSample:
         """Read a complete sample (accel + gyro + mag + temp)."""
         loop = self._loop or asyncio.get_running_loop()
@@ -427,6 +550,9 @@ class IMUReader:
         ax, ay, az, gx, gy, gz = await loop.run_in_executor(
             None, self._driver.read_accel_gyro
         )
+        # Continuously refine gravity estimate
+        self._update_gravity(ax, ay, az)
+
         mag = await loop.run_in_executor(
             None, self._driver.read_magnetometer
         )
@@ -446,6 +572,7 @@ class IMUReader:
             mag_y=mag[1] if mag else None,
             mag_z=mag[2] if mag else None,
             temperature=temp,
+            _gravity_unit=self._gravity_unit,
         )
 
     async def read_accel_gyro_only(self) -> IMUSample:
@@ -456,6 +583,8 @@ class IMUReader:
         ax, ay, az, gx, gy, gz = await loop.run_in_executor(
             None, self._driver.read_accel_gyro
         )
+        # Continuously refine gravity estimate
+        self._update_gravity(ax, ay, az)
 
         return IMUSample(
             timestamp=now,
@@ -465,6 +594,7 @@ class IMUReader:
             gyro_x=gx,
             gyro_y=gy,
             gyro_z=gz,
+            _gravity_unit=self._gravity_unit,
         )
 
     def close(self) -> None:
