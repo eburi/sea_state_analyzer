@@ -561,9 +561,11 @@ class TestConfigLearnerField:
     """Tests for learner_persist_path config field."""
 
     def test_default_path(self) -> None:
+        from pathlib import Path
         from config import Config
         cfg = Config()
-        assert cfg.learner_persist_path == "/data/vessel_rao.json"
+        expected = str(Path.home() / ".sea_state_analyzer" / "vessel_rao.json")
+        assert cfg.learner_persist_path == expected
 
     def test_overridable(self) -> None:
         from config import Config

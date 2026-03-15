@@ -115,7 +115,7 @@ All tests live under `tests/`. `conftest.py` at the project root adds `src/` to 
 
 ## Output files
 
-All outputs go to `output/YYYYMMDD_HHMMSS/`:
+All outputs go to `~/.sea_state_analyzer/output/YYYYMMDD_HHMMSS/` (default) or the path set by `SEA_STATE_OUTPUT_DIR`:
 
 | File | Description |
 |------|-------------|

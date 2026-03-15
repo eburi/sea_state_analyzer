@@ -56,6 +56,10 @@ export SEA_STATE_PUBLISH_TO_SIGNALK="$PUBLISH_TO_SIGNALK"
 export SEA_STATE_ENABLE_PLOTS="$ENABLE_PLOTS"
 export SEA_STATE_LOG_LEVEL="$LOG_LEVEL"
 
+# Override data paths for HA (defaults are ~/.sea_state_analyzer/ for bare OS)
+export SEA_STATE_AUTH_TOKEN_FILE="/data/signalk_token.json"
+export SEA_STATE_LEARNER_PERSIST_PATH="/data/vessel_rao.json"
+
 # Output goes to /share/sea_state_analyzer/ so it's accessible from HA
 export SEA_STATE_OUTPUT_DIR="/share/sea_state_analyzer"
 mkdir -p "$SEA_STATE_OUTPUT_DIR"

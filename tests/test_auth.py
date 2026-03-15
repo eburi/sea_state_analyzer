@@ -524,8 +524,10 @@ class TestEnsureAuthToken:
 
 class TestConfigAuth:
     def test_default_auth_token_file(self) -> None:
+        from pathlib import Path
         c = Config()
-        assert c.auth_token_file == "/data/signalk_token.json"
+        expected = str(Path.home() / ".sea_state_analyzer" / "signalk_token.json")
+        assert c.auth_token_file == expected
 
     def test_default_auth_device_description(self) -> None:
         c = Config()
@@ -558,6 +560,14 @@ class TestConfigAuth:
             assert c.auth_token_file == "/custom/path/token.json"
         finally:
             del os.environ["SEA_STATE_AUTH_TOKEN_FILE"]
+
+    def test_from_env_learner_persist_path(self) -> None:
+        os.environ["SEA_STATE_LEARNER_PERSIST_PATH"] = "/custom/path/rao.json"
+        try:
+            c = Config.from_env()
+            assert c.learner_persist_path == "/custom/path/rao.json"
+        finally:
+            del os.environ["SEA_STATE_LEARNER_PERSIST_PATH"]
 
 
 # --------------------------------------------------------------------------- #

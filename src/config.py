@@ -47,7 +47,9 @@ class Config:
     # ------------------------------------------------------------------ #
     # Output                                                               #
     # ------------------------------------------------------------------ #
-    output_base_dir: Path = field(default_factory=lambda: Path("output"))
+    output_base_dir: Path = field(
+        default_factory=lambda: Path.home() / ".sea_state_analyzer" / "output"
+    )
 
     # ------------------------------------------------------------------ #
     # Logging                                                               #
@@ -135,7 +137,13 @@ class Config:
     # Signal K authentication                                              #
     # ------------------------------------------------------------------ #
     # Path to persist the device clientId and JWT token across restarts.
-    auth_token_file: str = "/data/signalk_token.json"
+    # Default uses ~/.sea_state_analyzer/ so it works on bare Raspbian;
+    # HA run.sh overrides to /data/signalk_token.json.
+    auth_token_file: str = field(
+        default_factory=lambda: str(
+            Path.home() / ".sea_state_analyzer" / "signalk_token.json"
+        )
+    )
     # Description shown in Signal K admin UI when requesting device access.
     auth_device_description: str = "Sea State Analyzer"
     # How long to poll for user approval before giving up (seconds).
@@ -147,7 +155,13 @@ class Config:
     # Online learning (Phase 3)                                            #
     # ------------------------------------------------------------------ #
     # Path to persist the learned vessel RAO model.
-    learner_persist_path: str = "/data/vessel_rao.json"
+    # Default uses ~/.sea_state_analyzer/ so it works on bare Raspbian;
+    # HA run.sh overrides to /data/vessel_rao.json.
+    learner_persist_path: str = field(
+        default_factory=lambda: str(
+            Path.home() / ".sea_state_analyzer" / "vessel_rao.json"
+        )
+    )
 
     # ------------------------------------------------------------------ #
     # Heave / wave height estimation                                       #
@@ -293,6 +307,10 @@ class Config:
         atf = _env("AUTH_TOKEN_FILE")
         if atf:
             kwargs["auth_token_file"] = atf
+
+        lpp = _env("LEARNER_PERSIST_PATH")
+        if lpp:
+            kwargs["learner_persist_path"] = lpp
 
         ep = _env_bool("ENABLE_PLOTS")
         if ep is not None:

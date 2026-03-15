@@ -14,7 +14,7 @@ Hs estimates beyond the static RAO model (Phase 2).
 Persistence
 -----------
 The learned model is saved as JSON to a configurable path (default
-``/data/vessel_rao.json``).  It is loaded on startup and saved periodically
+``~/.sea_state_analyzer/vessel_rao.json``).  It is loaded on startup and saved periodically
 or on shutdown.  The file format is a simple dict of bin-key -> stats.
 
 Usage

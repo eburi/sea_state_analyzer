@@ -3,8 +3,9 @@
 A Python application that connects to a Signal K marine server, reads an
 onboard IMU (ICM-20948 accelerometer/gyroscope/magnetometer), estimates wave
 conditions including multi-component spectral partitioning (wind-wave, swell 1,
-swell 2), and publishes wave estimates back to Signal K.  Runs as a **Home
-Assistant App** on a Raspberry Pi 5.
+swell 2), and publishes wave estimates back to Signal K.  Designed to run on
+**bare Raspbian OS / OpenPlotter** or as a **Home Assistant App** on a
+Raspberry Pi 5.
 
 > **Domain caution:** Wave height, period, and partition outputs are **estimated
 > from vessel motion** using Kalman-filtered heave, Doppler correction, hull
@@ -35,7 +36,7 @@ src/
   recorder.py          – batched JSONL + Parquet output
   plotter.py           – console summaries + optional matplotlib PNGs
   main.py              – CLI entry point: live / inspect / replay modes
-tests/                 – pytest unit tests (494 tests)
+tests/                 – pytest unit tests (502 tests)
 conftest.py            – adds src/ to sys.path for pytest
 sea_state_analyzer/    – Home Assistant App packaging (config.yaml, Dockerfile, run.sh)
 ```
@@ -133,7 +134,9 @@ python src/main.py replay --input output/20240601_120000/raw_self_deltas.jsonl -
 
 ## Output files
 
-All outputs are written to a session-stamped directory under `output/`:
+All outputs are written to a session-stamped directory under
+`~/.sea_state_analyzer/output/` (default) or the path set by
+`SEA_STATE_OUTPUT_DIR`:
 
 | File | Format | Description |
 |------|--------|-------------|
@@ -348,10 +351,87 @@ pytest tests/ -v
 
 ## Deployment
 
-The application runs as a **Home Assistant App** (formerly "Add-on") alongside
-the Signal K App on a Raspberry Pi 5 running HAOS.
+### Running on Raspbian OS / OpenPlotter
+
+The application runs directly on any Raspberry Pi (or x86 Linux box) with
+Python 3.11+ and a Signal K server reachable on the network.  No containers,
+no Home Assistant required.
+
+#### 1. System packages
+
+```bash
+sudo apt update
+sudo apt install -y \
+  python3 python3-pip python3-venv \
+  python3-numpy python3-scipy python3-pandas python3-matplotlib \
+  i2c-tools
+```
+
+#### 2. I2C setup (for IMU)
+
+```bash
+sudo raspi-config          # Interface Options → I2C → Enable
+sudo usermod -aG i2c $USER # allow non-root I2C access
+# log out and back in, then verify:
+i2cdetect -y 1             # should show 0x68 for ICM-20948
+```
+
+#### 3. Python dependencies
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+# smbus2 is needed for IMU; pyarrow for Parquet output
+pip install smbus2 pyarrow
+```
+
+#### 4. Run
+
+```bash
+python3 src/main.py live
+# or with plots:
+python3 src/main.py live --plots
+# override Signal K URL:
+python3 src/main.py live --url http://192.168.1.100:3000
+```
+
+No environment variables are needed — defaults write to
+`~/.sea_state_analyzer/` for token storage, learned models, and output files.
+
+On first run the app will request device access from Signal K.  Open the
+Signal K admin UI and approve the "Sea State Analyzer" device within 5 minutes.
+
+#### 5. Run as a systemd service (optional)
+
+```bash
+cat <<'EOF' | sudo tee /etc/systemd/system/sea-state-analyzer.service
+[Unit]
+Description=Sea State Analyzer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/sea_state_analyzer
+ExecStart=/home/pi/sea_state_analyzer/.venv/bin/python3 src/main.py live
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now sea-state-analyzer
+```
 
 ### Deploying to Home Assistant
+
+The app also runs as a **Home Assistant App** (formerly "Add-on") alongside
+the Signal K App on a Raspberry Pi 5 running HAOS.  The HA `run.sh` overrides
+default paths to use `/data/` and `/share/` volumes.
 
 ```bash
 # Copy files to HA host and rebuild
@@ -372,8 +452,9 @@ The app packaging lives in `sea_state_analyzer/` with:
 - The only external dependency is Signal K's WebSocket delta API — no Signal K library imports, no plugin SDK.
 - All configuration lives in `config.py` and environment variables.
 - Single long-running async Python process.
-- Output files written to `/root/share/sea_state_analyzer/` on HA (mapped volume).
-- JWT token persisted at `/data/signalk_token.json` for reconnection.
+- Default data paths use `~/.sea_state_analyzer/` in the user's home directory, so the app works on bare Raspbian without any environment variable overrides.
+- The HA `run.sh` overrides paths to HA-specific locations (`/data/`, `/share/`).
+- JWT token persisted at `~/.sea_state_analyzer/signalk_token.json` (or `/data/signalk_token.json` on HA).
 - Graceful degradation: works on macOS without IMU (attitude-only estimation).
 
 ---
