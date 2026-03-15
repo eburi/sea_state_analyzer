@@ -36,10 +36,13 @@ import logging
 import math
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, Optional, Tuple
+from typing import TYPE_CHECKING, Deque, Optional, Tuple
 
 import numpy as np
 from scipy import signal as scipy_signal
+
+if TYPE_CHECKING:
+    from vessel_config import HullParameters
 
 logger = logging.getLogger(__name__)
 
@@ -471,6 +474,148 @@ def butterworth_lowpass(
 
 
 # --------------------------------------------------------------------------- #
+# Hull resonance suppression for PSD peak detection                            #
+# --------------------------------------------------------------------------- #
+
+def _hull_resonance_suppression(
+    freqs: np.ndarray,
+    psd: np.ndarray,
+    hull_params: "HullParameters",
+    suppression_factor: float = 0.1,
+    bandwidth_hz: float = 0.08,
+) -> np.ndarray:
+    """Suppress hull resonance frequencies in the displacement PSD.
+
+    Applies a notch-like penalty around known hull resonance frequencies
+    so that the PSD peak detection prefers ocean swell frequencies over
+    hull-amplified response peaks.
+
+    The suppression uses a Gaussian-shaped notch centred on each resonance
+    frequency.  At the exact resonance frequency, the PSD is multiplied by
+    ``suppression_factor`` (e.g. 0.1 = 90% suppression).  The notch width
+    is controlled by ``bandwidth_hz`` (standard deviation of the Gaussian).
+
+    Parameters
+    ----------
+    freqs : ndarray
+        Frequency axis from Welch PSD (Hz).
+    psd : ndarray
+        Displacement PSD to suppress (modified in-place and returned).
+    hull_params : HullParameters
+        Known hull resonance parameters.
+    suppression_factor : float
+        Minimum multiplier at resonance centre (0-1).  Lower = stronger
+        suppression.  Default 0.1 (90% suppression).
+    bandwidth_hz : float
+        Standard deviation of the Gaussian notch in Hz.  Default 0.08 Hz
+        covers ±~0.16 Hz (2-sigma) around each resonance.
+
+    Returns
+    -------
+    Modified PSD array with hull resonance suppressed.
+    """
+    if bandwidth_hz <= 0:
+        return psd
+
+    resonance_freqs: list[float] = []
+
+    # Primary hull resonance (wavelength ~ LOA)
+    if hull_params.resonant_period is not None and hull_params.resonant_period > 0:
+        resonance_freqs.append(1.0 / hull_params.resonant_period)
+
+    # Beam resonance
+    if hull_params.beam_resonant_period is not None and hull_params.beam_resonant_period > 0:
+        resonance_freqs.append(1.0 / hull_params.beam_resonant_period)
+
+    # Natural roll/pitch period range — suppress the entire band
+    for p_min_attr, p_max_attr in [
+        ("natural_roll_period_min", "natural_roll_period_max"),
+        ("natural_pitch_period_min", "natural_pitch_period_max"),
+    ]:
+        p_min = getattr(hull_params, p_min_attr, None)
+        p_max = getattr(hull_params, p_max_attr, None)
+        if p_min and p_max and p_min > 0 and p_max > 0:
+            # Add centre of the natural period band as a resonance
+            centre_period = (p_min + p_max) / 2.0
+            resonance_freqs.append(1.0 / centre_period)
+
+    if not resonance_freqs:
+        return psd
+
+    # De-duplicate close frequencies (within bandwidth_hz)
+    unique_freqs: list[float] = []
+    for f in sorted(resonance_freqs):
+        if not unique_freqs or f - unique_freqs[-1] > bandwidth_hz:
+            unique_freqs.append(f)
+
+    # Apply Gaussian notch suppression for each resonance
+    result = psd.copy()
+    for f_res in unique_freqs:
+        # Gaussian: multiplier = 1 - (1 - suppression_factor) * exp(-0.5 * ((f - f_res) / bw)^2)
+        gaussian = np.exp(-0.5 * ((freqs - f_res) / bandwidth_hz) ** 2)
+        multiplier = 1.0 - (1.0 - suppression_factor) * gaussian
+        result *= multiplier
+
+    return result
+
+
+def _spectral_hs_from_displacement_psd(
+    freqs: np.ndarray,
+    accel_psd: np.ndarray,
+    freq_min_hz: float = 0.03,
+    freq_max_hz: float = 1.0,
+) -> Optional[float]:
+    """Compute Hs from spectral integration of displacement PSD.
+
+    Uses the standard definition: Hs = 4 * sqrt(m0) where m0 is the
+    zeroth spectral moment (integral of the displacement PSD).
+
+    This method is independent of peak frequency detection and captures
+    ALL wave energy in the band, making it robust to hull resonance
+    contamination of the peak frequency.
+
+    Parameters
+    ----------
+    freqs : ndarray
+        Frequency axis (Hz).
+    accel_psd : ndarray
+        Acceleration PSD (m²/s⁴/Hz).
+    freq_min_hz : float
+        Lower integration bound.
+    freq_max_hz : float
+        Upper integration bound.
+
+    Returns
+    -------
+    Significant wave height in metres, or None if computation fails.
+    """
+    valid = (freqs > freq_min_hz) & (freqs <= freq_max_hz)
+    if not np.any(valid):
+        return None
+
+    f_valid = freqs[valid]
+    psd_valid = accel_psd[valid]
+
+    # Convert acceleration PSD to displacement PSD:
+    #   S_disp(f) = S_accel(f) / (2*pi*f)^4
+    omega4 = (2.0 * math.pi * f_valid) ** 4
+    omega4[omega4 < 1e-12] = 1e-12
+    psd_disp = psd_valid / omega4
+
+    # m0 = integral of displacement PSD over frequency
+    if len(f_valid) < 2:
+        return None
+    _trapz = getattr(np, "trapezoid", getattr(np, "trapz", None))
+    if _trapz is None:
+        return None
+    m0 = float(_trapz(psd_disp, f_valid))
+    if m0 <= 0:
+        return None
+
+    return 4.0 * math.sqrt(m0)
+
+
+# --------------------------------------------------------------------------- #
 # Combined wave estimator: runs both methods on a window of accel data         #
 # --------------------------------------------------------------------------- #
 
@@ -487,6 +632,9 @@ class WaveEstimate:
     heave: Optional[float] = None
     confidence: float = 0.0
     method_used: Optional[str] = None
+
+    # Spectral integration Hs (m0-based, independent of peak freq)
+    spectral_hs: Optional[float] = None
 
     # Accel statistics used
     accel_dominant_freq: Optional[float] = None
@@ -506,15 +654,18 @@ def estimate_waves_from_accel(
     freq_min_hz: float = 0.03,
     freq_max_hz: float = 1.0,
     trochoidal_min_amplitude: float = 0.005,
+    hull_params: Optional["HullParameters"] = None,
 ) -> WaveEstimate:
     """Estimate wave height from a window of vertical acceleration data.
 
     This is the main entry point for wave estimation.  It:
-    1. Computes the dominant frequency from PSD of vertical_accel
-    2. Low-pass filters the acceleration
-    3. Runs trochoidal estimation from peak accel + frequency
-    4. Runs Kalman heave estimation (if estimator provided)
-    5. Combines results into a best estimate
+    1. Computes the dominant frequency from PSD of vertical_accel,
+       with optional hull-resonance suppression
+    2. Computes spectral Hs from displacement PSD integration (m0-based)
+    3. Low-pass filters the acceleration
+    4. Runs trochoidal estimation from peak accel + frequency
+    5. Runs Kalman heave estimation (if estimator provided)
+    6. Combines results into a best estimate
 
     Parameters
     ----------
@@ -537,6 +688,9 @@ def estimate_waves_from_accel(
         Excludes engine vibration and high-freq noise from PSD peak.
     trochoidal_min_amplitude : float
         Minimum trochoidal wave amplitude (m) to consider real.
+    hull_params : HullParameters or None
+        If provided, hull resonance frequencies are suppressed in the
+        displacement PSD before peak detection.
 
     Returns
     -------
@@ -583,6 +737,12 @@ def estimate_waves_from_accel(
     if psd_valid.max() == 0:
         return result
 
+    # --- Spectral Hs from m0 integration (independent of peak freq) --- #
+    spectral_hs = _spectral_hs_from_displacement_psd(
+        freqs, psd_valid, freq_min_hz, freq_max_hz,
+    )
+    result.spectral_hs = spectral_hs
+
     # Weight PSD by 1/f² for peak detection.  Ocean wave energy scales
     # roughly as f^{-4} (Pierson–Moskowitz / JONSWAP), but the raw
     # acceleration PSD scales as f^{+2} relative to displacement PSD
@@ -594,6 +754,17 @@ def estimate_waves_from_accel(
     freq_sq = freqs ** 2
     freq_sq[freq_sq < 1e-6] = 1e-6  # avoid division by zero at DC
     psd_disp /= freq_sq
+
+    # --- Hull resonance suppression --- #
+    # If hull parameters are known, suppress resonance frequencies in the
+    # displacement PSD so the peak detector finds ocean swell instead of
+    # hull-amplified response.
+    if hull_params is not None:
+        psd_disp = _hull_resonance_suppression(
+            freqs, psd_disp, hull_params,
+            suppression_factor=0.1,
+            bandwidth_hz=0.08,
+        )
 
     if psd_disp[valid_mask].max() == 0:
         return result
@@ -610,6 +781,14 @@ def estimate_waves_from_accel(
     result.accel_dominant_freq = dom_freq
     result.accel_dominant_period = 1.0 / dom_freq if dom_freq > 0 else None
     result.accel_freq_confidence = confidence
+
+    logger.debug(
+        "PSD peak: freq=%.3f Hz (T=%.1fs), hull_suppression=%s, spectral_hs=%s",
+        dom_freq,
+        1.0 / dom_freq if dom_freq > 0 else 0,
+        "yes" if hull_params is not None else "no",
+        f"{spectral_hs:.2f}m" if spectral_hs is not None else "None",
+    )
 
     # --- Low-pass filter --- #
     cutoff = dom_freq * lowpass_cutoff_mult
@@ -638,25 +817,24 @@ def estimate_waves_from_accel(
         result.kalman = kalman_est
 
     # --- Best estimate selection --- #
+    # Priority: spectral Hs as sanity check, then Kalman > trochoidal.
+    # If spectral_hs is available and significantly larger than trochoidal,
+    # prefer spectral (it captures all energy, not just the peak).
     if troch is not None and result.kalman is not None and result.kalman.converged:
-        # Both available -- prefer Kalman Hs (more robust), but validate
-        # against trochoidal.  If they agree within 2x, use Kalman.
         hs_kalman = result.kalman.significant_height
         hs_troch = troch.significant_height
         ratio = hs_kalman / (hs_troch + 1e-6)
 
         if 0.3 < ratio < 3.0:
-            # Agreement: use Kalman (better for irregular seas)
             result.significant_height = hs_kalman
             result.heave = result.kalman.heave_displacement
             result.method_used = "kalman"
             result.confidence = min(confidence, 0.8 if result.kalman.converged else 0.4)
         else:
-            # Disagreement: use trochoidal (more direct measurement)
             result.significant_height = hs_troch
-            result.heave = result.kalman.heave_displacement  # still use Kalman heave
+            result.heave = result.kalman.heave_displacement
             result.method_used = "trochoidal"
-            result.confidence = confidence * 0.5  # lower confidence due to disagreement
+            result.confidence = confidence * 0.5
     elif troch is not None:
         result.significant_height = troch.significant_height
         result.method_used = "trochoidal"
@@ -666,5 +844,23 @@ def estimate_waves_from_accel(
         result.heave = result.kalman.heave_displacement
         result.method_used = "kalman"
         result.confidence = 0.4 if result.kalman.converged else 0.2
+
+    # --- Spectral cross-check --- #
+    # If spectral Hs is available and the chosen estimate is significantly
+    # lower (< 40% of spectral), upgrade to spectral.  This catches cases
+    # where hull resonance or poor peak detection underestimates Hs.
+    if spectral_hs is not None and spectral_hs > 0.05:
+        if result.significant_height is None:
+            result.significant_height = spectral_hs
+            result.method_used = "spectral"
+            result.confidence = confidence * 0.5
+        elif result.significant_height < spectral_hs * 0.4:
+            logger.debug(
+                "spectral cross-check: upgrading Hs from %.2f to %.2f (spectral)",
+                result.significant_height, spectral_hs,
+            )
+            result.significant_height = spectral_hs
+            result.method_used = "spectral"
+            result.confidence = confidence * 0.5
 
     return result

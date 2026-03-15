@@ -886,6 +886,7 @@ class FeatureExtractor:
             freq_min_hz=self._config.heave_freq_min_hz,
             freq_max_hz=self._config.heave_freq_max_hz,
             trochoidal_min_amplitude=self._config.heave_trochoidal_min_amplitude,
+            hull_params=self._hull_params if _HULL_AVAILABLE else None,
         )
 
         # Overlay Kalman heave results if the filter has converged
@@ -919,12 +920,13 @@ class FeatureExtractor:
         # Log wave estimation result
         logger.debug(
             "wave_est: samples=%d, accel_rms=%.4f, freq=%.3f, "
-            "troch=%s, kalman=%s, Hs=%s, method=%s, accel_max=%.4f",
+            "troch=%s, kalman=%s, spectral=%s, Hs=%s, method=%s, accel_max=%.4f",
             len(accel_data),
             wave_est.accel_rms or 0.0,
             wave_est.accel_dominant_freq or 0.0,
             f"{wave_est.trochoidal.significant_height:.3f}" if wave_est.trochoidal else "None",
             f"{wave_est.kalman.significant_height:.3f}" if wave_est.kalman else "None",
+            f"{wave_est.spectral_hs:.3f}" if wave_est.spectral_hs is not None else "None",
             f"{wave_est.significant_height:.3f}" if wave_est.significant_height is not None else "None",
             wave_est.method_used,
             wave_est.accel_max or 0.0,

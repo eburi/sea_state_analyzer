@@ -56,8 +56,9 @@ def _bar(value: float, width: int = 20) -> str:
 
 class TerminalPlotter:
     """
-    Prints a formatted live summary to stdout every console_interval_s seconds.
-    Does not block the asyncio event loop – call print_summary() from a task.
+    Prints a machine-readable live summary to stdout every console_interval_s.
+    Output uses key=value format suitable for log parsing and `ha apps logs`.
+    Does not block the asyncio event loop -- call print_summary() from a task.
     """
 
     def __init__(self, config: Config = DEFAULT_CONFIG) -> None:
@@ -71,20 +72,13 @@ class TerminalPlotter:
         wf_short: Optional[WindowFeatures],
         me: Optional[MotionEstimate],
     ) -> None:
-        now_str = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
-        conn_icon = "●" if status.connected else "○"
-        conn_str = "CONNECTED" if status.connected else "disconnected"
+        now_str = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        conn_str = "up" if status.connected else "down"
 
         lines = [
-            "",
-            f"╔══════════════════════════════════════════════════════════╗",
-            f"║  BoatState – Wave Motion Monitor   {now_str}    ║",
-            f"╠══════════════════════════════════════════════════════════╣",
-            f"║  {conn_icon} {conn_str:<12}  "
-            f"samples={status.samples_produced:>6}  "
-            f"rate={status.sample_rate_hz:.1f}Hz  "
+            f"--- boat_state {now_str}Z conn={conn_str} "
+            f"samples={status.samples_produced} rate={status.sample_rate_hz:.1f}Hz "
             f"reconnects={status.reconnect_count}",
-            f"╠══════════════════════════════════════════════════════════╣",
         ]
 
         if sample is not None:
@@ -92,87 +86,70 @@ class TerminalPlotter:
             pitch_deg = _rad_to_deg(sample.pitch)
             heading_deg = _rad_to_deg(sample.heading)
             cog_deg = _rad_to_deg(sample.cog)
-            lines += [
-                f"║  ATTITUDE    roll={_fmt(roll_deg, '.1f', '°'):>8}  "
-                f"pitch={_fmt(pitch_deg, '.1f', '°'):>8}",
-                f"║  NAVIGATION  hdg={_fmt(heading_deg, '.1f', '°'):>8}   "
-                f"cog={_fmt(cog_deg, '.1f', '°'):>8}   "
-                f"sog={_fmt(sample.sog, '.2f', 'm/s'):>10}",
-            ]
+            lines.append(
+                f"  att: roll={_fmt(roll_deg, '.1f', 'deg')} "
+                f"pitch={_fmt(pitch_deg, '.1f', 'deg')} "
+                f"hdg={_fmt(heading_deg, '.1f', 'deg')} "
+                f"cog={_fmt(cog_deg, '.1f', 'deg')} "
+                f"sog={_fmt(sample.sog, '.2f', 'm/s')}"
+            )
             if sample.wind_speed_true is not None:
                 tws_kn = _ms_to_knots(sample.wind_speed_true)
                 twa_deg = _rad_to_deg(sample.wind_angle_true)
                 aws_kn = _ms_to_knots(sample.wind_speed_apparent)
                 awa_deg = _rad_to_deg(sample.wind_angle_apparent)
                 lines.append(
-                    f"║  WIND TRUE   {_fmt(tws_kn, '.1f', 'kn'):>10}  "
-                    f"angle={_fmt(twa_deg, '.0f', '°'):>7}"
-                    f"   APP {_fmt(aws_kn, '.1f', 'kn'):>7}  "
-                    f"angle={_fmt(awa_deg, '.0f', '°'):>7}"
+                    f"  wind: tws={_fmt(tws_kn, '.1f', 'kn')} "
+                    f"twa={_fmt(twa_deg, '.0f', 'deg')} "
+                    f"aws={_fmt(aws_kn, '.1f', 'kn')} "
+                    f"awa={_fmt(awa_deg, '.0f', 'deg')}"
                 )
-        else:
-            lines.append("║  (no sample yet)")
-
-        lines.append(f"╠══════════════════════════════════════════════════════════╣")
 
         if wf_short is not None:
             roll_rms_deg = _rad_to_deg(wf_short.roll_rms)
             pitch_rms_deg = _rad_to_deg(wf_short.pitch_rms)
-            lines += [
-                f"║  MOTION {int(wf_short.window_s)}s  "
-                f"roll_RMS={_fmt(roll_rms_deg, '.1f', '°'):>8}  "
-                f"pitch_RMS={_fmt(pitch_rms_deg, '.1f', '°'):>8}",
-                f"║            "
-                f"roll_T={_fmt(wf_short.roll_dominant_period, '.1f', 's'):>8}  "
-                f"pitch_T={_fmt(wf_short.pitch_dominant_period, '.1f', 's'):>8}",
-            ]
-        else:
-            lines.append("║  (collecting motion data…)")
-
-        lines.append(f"╠══════════════════════════════════════════════════════════╣")
+            lines.append(
+                f"  motion({int(wf_short.window_s)}s): "
+                f"roll_rms={_fmt(roll_rms_deg, '.1f', 'deg')} "
+                f"pitch_rms={_fmt(pitch_rms_deg, '.1f', 'deg')} "
+                f"roll_T={_fmt(wf_short.roll_dominant_period, '.1f', 's')} "
+                f"pitch_T={_fmt(wf_short.pitch_dominant_period, '.1f', 's')}"
+            )
 
         if me is not None:
             sev = me.motion_severity_smoothed or 0.0
-            sev_bar = _bar(sev)
-            lines += [
-                f"║  SEVERITY    {_fmt(sev, '.3f'):>8} {sev_bar}",
-                f"║  REGIME      {me.motion_regime or '--':<10}  "
-                f"trend={me.severity_trend or '--'}",
-                f"║  DIRECTION   {me.encounter_direction or '--':<22}  "
-                f"conf={_fmt(me.direction_confidence,'.2f'):>6}",
-                f"║  REGULARITY  {me.motion_regularity or '--':<12}  "
-                f"confusion={_fmt(me.confusion_index,'.2f'):>6}",
-                f"║  COMFORT     {_fmt(me.comfort_proxy, '.3f'):>8}  "
-                f"confidence={_fmt(me.overall_confidence, '.2f'):>6}",
-            ]
-            # Wave height from accelerometer (if available)
+            lines.append(
+                f"  severity={sev:.3f} "
+                f"regime={me.motion_regime or '--'} "
+                f"trend={me.severity_trend or '--'} "
+                f"direction={me.encounter_direction or '--'} "
+                f"dir_conf={_fmt(me.direction_confidence, '.2f')}"
+            )
+            lines.append(
+                f"  regularity={me.motion_regularity or '--'} "
+                f"confusion={_fmt(me.confusion_index, '.2f')} "
+                f"comfort={_fmt(me.comfort_proxy, '.3f')} "
+                f"overall_conf={_fmt(me.overall_confidence, '.2f')}"
+            )
             if me.significant_height is not None:
-                hs_str = _fmt(me.significant_height, '.2f', 'm')
-                method = me.wave_height_method or "--"
-                conf_str = _fmt(me.wave_height_confidence, '.2f')
-                heave_str = _fmt(me.heave, '.3f', 'm') if me.heave is not None else "  --  "
                 lines.append(
-                    f"║  WAVES  Hs={hs_str:>7}  "
-                    f"heave={heave_str:>8}  "
-                    f"method={method:<10} "
-                    f"conf={conf_str:>5}"
+                    f"  waves: Hs={_fmt(me.significant_height, '.2f', 'm')} "
+                    f"heave={_fmt(me.heave, '.3f', 'm')} "
+                    f"method={me.wave_height_method or '--'} "
+                    f"conf={_fmt(me.wave_height_confidence, '.2f')}"
                 )
             if me.accel_dominant_period is not None:
-                period_str = _fmt(me.accel_dominant_period, '.1f', 's')
-                freq_str = _fmt(me.accel_dominant_freq, '.3f', 'Hz')
                 lines.append(
-                    f"║         T={period_str:>7}  freq={freq_str:>9}"
+                    f"  accel: T={_fmt(me.accel_dominant_period, '.1f', 's')} "
+                    f"freq={_fmt(me.accel_dominant_freq, '.3f', 'Hz')} "
+                    f"rao={_fmt(me.rao_gain_applied, '.3f')}"
                 )
-        else:
-            lines.append("║  (computing motion estimates…)")
 
-        lines.append(f"╚══════════════════════════════════════════════════════════╝")
-
-        # Print freshness summary
+        # Stale field warnings
         if sample is not None and sample.field_valid:
             stale = [k for k, v in sample.field_valid.items() if not v]
             if stale:
-                lines.append(f"  ⚠  Stale fields: {', '.join(stale)}")
+                lines.append(f"  stale: {', '.join(stale)}")
 
         print("\n".join(lines))
 

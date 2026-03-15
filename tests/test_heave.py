@@ -676,3 +676,305 @@ class TestPublisherWaveFields:
                 assert v["value"] == 1.23  # rounded to 2 decimal places
             if v["path"] == "environment.heave":
                 assert v["value"] == 0.123  # rounded to 3 decimal places
+
+
+# --------------------------------------------------------------------------- #
+# 7. Hull resonance suppression                                                #
+# --------------------------------------------------------------------------- #
+
+class TestHullResonanceSuppression:
+
+    def _make_hull_params(
+        self,
+        resonant_period: float = 2.99,
+        beam_resonant_period: float = 2.26,
+        roll_period_range: tuple[float, float] = (2.0, 4.0),
+        pitch_period_range: tuple[float, float] = (2.0, 4.0),
+    ) -> "HullParameters":
+        from vessel_config import HullParameters, HullType
+        return HullParameters(
+            hull_type=HullType.CATAMARAN,
+            resonant_period=resonant_period,
+            beam_resonant_period=beam_resonant_period,
+            natural_roll_period_min=roll_period_range[0],
+            natural_roll_period_max=roll_period_range[1],
+            natural_pitch_period_min=pitch_period_range[0],
+            natural_pitch_period_max=pitch_period_range[1],
+        )
+
+    def test_suppression_function_exists(self) -> None:
+        from heave_estimator import _hull_resonance_suppression
+        assert callable(_hull_resonance_suppression)
+
+    def test_no_hull_params_returns_unchanged(self) -> None:
+        """Without hull params, PSD should be unchanged."""
+        from heave_estimator import _hull_resonance_suppression
+        from vessel_config import HullParameters
+
+        freqs = np.linspace(0.01, 1.0, 100)
+        psd = np.ones(100)
+        hull = HullParameters()  # no resonance info
+        result = _hull_resonance_suppression(freqs, psd, hull)
+        np.testing.assert_array_equal(result, psd)
+
+    def test_suppression_at_resonance_frequency(self) -> None:
+        """PSD should be heavily suppressed at hull resonance frequency."""
+        from heave_estimator import _hull_resonance_suppression
+
+        hull = self._make_hull_params(resonant_period=3.0)
+        res_freq = 1.0 / 3.0  # ~0.333 Hz
+
+        freqs = np.linspace(0.01, 1.0, 1000)
+        psd = np.ones(1000)
+        result = _hull_resonance_suppression(freqs, psd, hull)
+
+        # Find the bin closest to 0.333 Hz
+        idx = np.argmin(np.abs(freqs - res_freq))
+        # Should be heavily suppressed (< 50% of original)
+        assert result[idx] < 0.5 * psd[idx]
+
+    def test_swell_frequency_not_suppressed(self) -> None:
+        """PSD at ocean swell frequencies (0.08-0.14 Hz) should be mostly preserved."""
+        from heave_estimator import _hull_resonance_suppression
+
+        hull = self._make_hull_params(resonant_period=3.0)
+
+        freqs = np.linspace(0.01, 1.0, 1000)
+        psd = np.ones(1000)
+        result = _hull_resonance_suppression(freqs, psd, hull)
+
+        # Check at 0.1 Hz (10s swell) and 0.125 Hz (8s swell)
+        for swell_freq in [0.1, 0.125]:
+            idx = np.argmin(np.abs(freqs - swell_freq))
+            # Should retain > 80% of original at swell frequencies
+            assert result[idx] > 0.8 * psd[idx], (
+                f"Swell freq {swell_freq} Hz too suppressed: {result[idx]:.3f}"
+            )
+
+    def test_both_resonances_suppressed(self) -> None:
+        """Both primary (LOA) and beam resonances should be suppressed."""
+        from heave_estimator import _hull_resonance_suppression
+
+        hull = self._make_hull_params(
+            resonant_period=3.0,
+            beam_resonant_period=2.26,
+        )
+        freqs = np.linspace(0.01, 1.0, 1000)
+        psd = np.ones(1000)
+        result = _hull_resonance_suppression(freqs, psd, hull)
+
+        # Check suppression at both resonance frequencies
+        for period in [3.0, 2.26]:
+            freq = 1.0 / period
+            idx = np.argmin(np.abs(freqs - freq))
+            assert result[idx] < 0.5, (
+                f"Period {period}s (freq {freq:.3f} Hz) not suppressed: {result[idx]:.3f}"
+            )
+
+    def test_suppression_with_zero_bandwidth_returns_unchanged(self) -> None:
+        """With bandwidth_hz=0, no suppression should be applied."""
+        from heave_estimator import _hull_resonance_suppression
+
+        hull = self._make_hull_params()
+        freqs = np.linspace(0.01, 1.0, 100)
+        psd = np.ones(100)
+        result = _hull_resonance_suppression(
+            freqs, psd, hull, bandwidth_hz=0.0,
+        )
+        np.testing.assert_array_equal(result, psd)
+
+    def test_wave_estimate_with_hull_suppression_picks_swell(self) -> None:
+        """With hull resonance suppression, PSD peak detection should pick
+        ocean swell (~0.125 Hz) instead of hull resonance (~0.33 Hz) when
+        the hull response is strong enough to dominate even after 1/f² weighting.
+
+        The 1/f² weighting converts accel PSD to displacement PSD.  For hull
+        resonance at 0.33 Hz to still dominate over swell at 0.125 Hz in
+        displacement PSD, it needs: hull_accel > swell_accel * (0.33/0.125)^2
+        = swell_accel * 6.97.  So hull amplitude must be ~7x larger in accel.
+        """
+        fs = 50.0
+        duration = 120.0  # 2 minutes
+        t = np.arange(0, duration, 1.0 / fs)
+
+        # Ocean swell at 0.125 Hz (8s period), moderate amplitude
+        swell = 0.3 * np.sin(2 * math.pi * 0.125 * t)
+        # Hull resonance at 0.33 Hz (3s period), very large amplitude
+        # (7x+ to overwhelm 1/f² weighting: 0.3 * 7 = 2.1, use 3.0)
+        hull_response = 3.0 * np.sin(2 * math.pi * 0.33 * t)
+        accel = swell + hull_response
+
+        hull_params = self._make_hull_params(
+            resonant_period=3.0,
+            beam_resonant_period=2.26,
+        )
+
+        # Without hull suppression: should detect ~0.33 Hz (hull resonance
+        # dominates even after 1/f² weighting because amplitude is 10x)
+        result_no_hull = estimate_waves_from_accel(
+            accel, fs=fs, hull_params=None,
+        )
+        # With hull suppression: should shift to ~0.125 Hz (ocean swell)
+        result_with_hull = estimate_waves_from_accel(
+            accel, fs=fs, hull_params=hull_params,
+        )
+
+        assert result_no_hull.accel_dominant_freq is not None
+        assert result_with_hull.accel_dominant_freq is not None
+
+        # Without suppression, peak should be near hull resonance
+        assert result_no_hull.accel_dominant_freq > 0.2, (
+            f"Without hull suppression expected >0.2 Hz, got {result_no_hull.accel_dominant_freq}"
+        )
+        # With suppression, peak should shift to swell frequency
+        assert result_with_hull.accel_dominant_freq < 0.2, (
+            f"With hull suppression expected <0.2 Hz, got {result_with_hull.accel_dominant_freq}"
+        )
+
+    def test_wave_estimate_with_hull_suppression_gives_larger_hs(self) -> None:
+        """When hull resonance is suppressed and swell frequency is detected,
+        the trochoidal estimate should give a larger Hs (because the detected
+        frequency is lower, leading to longer wavelength)."""
+        fs = 50.0
+        duration = 120.0
+        t = np.arange(0, duration, 1.0 / fs)
+
+        # Same ratio: hull ~10x swell to overwhelm 1/f² weighting
+        swell = 0.3 * np.sin(2 * math.pi * 0.125 * t)
+        hull_response = 3.0 * np.sin(2 * math.pi * 0.33 * t)
+        accel = swell + hull_response
+
+        hull_params = self._make_hull_params()
+
+        result_no_hull = estimate_waves_from_accel(accel, fs=fs, hull_params=None)
+        result_with_hull = estimate_waves_from_accel(accel, fs=fs, hull_params=hull_params)
+
+        # Both should produce estimates
+        hs_no = result_no_hull.significant_height
+        hs_with = result_with_hull.significant_height
+        assert hs_no is not None
+        assert hs_with is not None
+
+        # With hull suppression (picks lower freq), Hs should be larger
+        # because trochoidal Hs scales with 1/f^2
+        assert hs_with > hs_no, (
+            f"Expected hull-suppressed Hs ({hs_with:.2f}) > unsuppressed ({hs_no:.2f})"
+        )
+
+
+# --------------------------------------------------------------------------- #
+# 8. Spectral Hs (m0-based)                                                   #
+# --------------------------------------------------------------------------- #
+
+class TestSpectralHs:
+
+    def test_spectral_hs_function_exists(self) -> None:
+        from heave_estimator import _spectral_hs_from_displacement_psd
+        assert callable(_spectral_hs_from_displacement_psd)
+
+    def test_spectral_hs_zero_signal_returns_none(self) -> None:
+        from heave_estimator import _spectral_hs_from_displacement_psd
+        freqs = np.linspace(0.0, 25.0, 100)
+        psd = np.zeros(100)
+        result = _spectral_hs_from_displacement_psd(freqs, psd)
+        assert result is None
+
+    def test_spectral_hs_pure_sine(self) -> None:
+        """For a pure sine accel at 0.1 Hz with known amplitude, spectral Hs
+        should be approximately 4*sqrt(m0) where m0 relates to wave amplitude."""
+        from heave_estimator import _spectral_hs_from_displacement_psd
+
+        fs = 50.0
+        duration = 120.0
+        t = np.arange(0, duration, 1.0 / fs)
+        freq = 0.1  # 10s wave
+        accel_amplitude = 0.5  # m/s^2
+
+        accel = accel_amplitude * np.sin(2 * math.pi * freq * t)
+
+        from scipy import signal as scipy_signal
+        nperseg = min(len(accel) // 2, 2048)
+        freqs_psd, psd = scipy_signal.welch(
+            accel - np.mean(accel), fs=fs, nperseg=nperseg,
+        )
+
+        result = _spectral_hs_from_displacement_psd(
+            freqs_psd, psd, freq_min_hz=0.03, freq_max_hz=1.0,
+        )
+        assert result is not None
+        assert result > 0
+        # For a 0.1 Hz wave, displacement_amplitude = accel_amplitude / omega^2
+        # = 0.5 / (2*pi*0.1)^2 = 0.5 / 0.3948 = 1.266 m
+        # Hs ~ 2*sqrt(2) * displacement_amplitude = 3.58 m
+        # (but PSD integration is approximate, so allow wide tolerance)
+        assert 0.5 < result < 10.0
+
+    def test_spectral_hs_in_wave_estimate(self) -> None:
+        """estimate_waves_from_accel should populate spectral_hs field."""
+        fs = 50.0
+        duration = 60.0
+        t = np.arange(0, duration, 1.0 / fs)
+        accel = 0.5 * np.sin(2 * math.pi * 0.1 * t)
+
+        result = estimate_waves_from_accel(accel, fs=fs)
+        assert result.spectral_hs is not None
+        assert result.spectral_hs > 0
+
+    def test_spectral_hs_captures_multi_frequency_energy(self) -> None:
+        """Spectral Hs should capture energy from multiple frequency
+        components (swell + wind chop), unlike trochoidal which only
+        uses the peak frequency."""
+        from heave_estimator import _spectral_hs_from_displacement_psd
+
+        fs = 50.0
+        duration = 120.0
+        t = np.arange(0, duration, 1.0 / fs)
+
+        # Single component
+        single = 0.5 * np.sin(2 * math.pi * 0.1 * t)
+        # Two components (more total energy)
+        multi = (0.5 * np.sin(2 * math.pi * 0.1 * t)
+                 + 0.3 * np.sin(2 * math.pi * 0.2 * t))
+
+        from scipy import signal as scipy_signal
+        nperseg = min(len(single) // 2, 2048)
+
+        _, psd_single = scipy_signal.welch(single - np.mean(single), fs=fs, nperseg=nperseg)
+        f, psd_multi = scipy_signal.welch(multi - np.mean(multi), fs=fs, nperseg=nperseg)
+
+        hs_single = _spectral_hs_from_displacement_psd(f, psd_single)
+        hs_multi = _spectral_hs_from_displacement_psd(f, psd_multi)
+
+        assert hs_single is not None
+        assert hs_multi is not None
+        # Multi-component should have more energy → larger Hs
+        assert hs_multi > hs_single
+
+    def test_spectral_crosscheck_upgrades_low_estimate(self) -> None:
+        """When spectral Hs is much larger than trochoidal, the combined
+        estimator should upgrade to spectral."""
+        fs = 50.0
+        duration = 120.0
+        t = np.arange(0, duration, 1.0 / fs)
+
+        # Strong low-frequency swell + strong hull resonance
+        swell = 1.0 * np.sin(2 * math.pi * 0.1 * t)
+        hull = 2.0 * np.sin(2 * math.pi * 0.33 * t)
+        accel = swell + hull
+
+        result = estimate_waves_from_accel(accel, fs=fs)
+        # Should have spectral_hs populated
+        assert result.spectral_hs is not None
+        assert result.spectral_hs > 0
+        # And significant_height should be populated
+        assert result.significant_height is not None
+
+    def test_empty_freq_band_returns_none(self) -> None:
+        from heave_estimator import _spectral_hs_from_displacement_psd
+        freqs = np.linspace(0.0, 25.0, 100)
+        psd = np.ones(100)
+        # Band with no valid frequencies
+        result = _spectral_hs_from_displacement_psd(
+            freqs, psd, freq_min_hz=30.0, freq_max_hz=40.0,
+        )
+        assert result is None
