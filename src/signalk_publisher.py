@@ -37,6 +37,7 @@ from paths import (
     WAVE_ENCOUNTER_PERIOD,
     WAVE_MOTION_REGIME,
     WAVE_MOTION_SEVERITY,
+    WAVE_PATH_META,
     WAVE_PERIOD,
     WAVE_PERIOD_CONFIDENCE,
     WAVE_SIGNIFICANT_HEIGHT,
@@ -128,6 +129,36 @@ def build_delta_message(
                 },
                 "timestamp": me.timestamp.isoformat().replace("+00:00", "Z"),
                 "values": values,
+            }
+        ],
+    }
+    return json.dumps(delta, separators=(",", ":"))
+
+
+def build_meta_delta(
+    self_context: str = "vessels.self",
+) -> str:
+    """Build a JSON meta delta message for all wave publish paths.
+
+    Signal K meta deltas use ``"meta"`` instead of ``"values"`` in the
+    update block.  Each entry maps a path to its metadata (units,
+    description, displayName, etc.).
+
+    This should be sent once on startup (after authentication) so that
+    Signal K dashboards and gauges can display proper units and labels.
+
+    Returns:
+        A JSON string ready to send over the WebSocket.
+    """
+    meta_entries: List[Dict[str, Any]] = [
+        {"path": path, "value": dict(meta)}
+        for path, meta in WAVE_PATH_META.items()
+    ]
+    delta = {
+        "context": self_context,
+        "updates": [
+            {
+                "meta": meta_entries,
             }
         ],
     }

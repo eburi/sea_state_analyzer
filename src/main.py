@@ -39,13 +39,14 @@ from models import (
     WindowFeatures,
 )
 from plotter import FilePlotter, TerminalPlotter
+from paths import WAVE_PATH_META
 from recorder import Recorder
 from signalk_client import InspectClient, SignalKClient
 from state_store import SelfStateStore
 
 # Try importing publisher
 try:
-    from signalk_publisher import build_delta_message
+    from signalk_publisher import build_delta_message, build_meta_delta
     _PUBLISHER_AVAILABLE = True
 except ImportError:
     _PUBLISHER_AVAILABLE = False
@@ -401,6 +402,20 @@ async def _live_mode(config: Config) -> None:
             logger.warning("Publish loop exiting — authentication failed")
             return
         logger.info("Publish loop: auth ready, starting delta publishing")
+
+        # Send metadata delta once so Signal K has units/descriptions
+        try:
+            meta_msg = build_meta_delta(self_context=client.self_context)
+            meta_ok = await client.send(meta_msg)
+            if meta_ok:
+                logger.info(
+                    "Published wave path metadata (%d bytes, %d paths)",
+                    len(meta_msg), len(WAVE_PATH_META),
+                )
+            else:
+                logger.warning("Failed to send wave path metadata (not connected?)")
+        except Exception as exc:
+            logger.warning("Error sending wave path metadata: %s", exc)
 
         publish_count = 0
         fail_count = 0

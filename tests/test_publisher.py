@@ -21,6 +21,7 @@ from models import MotionEstimate
 from signalk_publisher import (
     _motion_estimate_to_values,
     build_delta_message,
+    build_meta_delta,
     publish_delta,
 )
 from paths import (
@@ -29,8 +30,10 @@ from paths import (
     WAVE_ENCOUNTER_PERIOD,
     WAVE_MOTION_REGIME,
     WAVE_MOTION_SEVERITY,
+    WAVE_PATH_META,
     WAVE_PERIOD,
     WAVE_PERIOD_CONFIDENCE,
+    WAVE_SIGNIFICANT_HEIGHT,
     WAVE_TRUE_PERIOD,
     WAVE_TRUE_WAVELENGTH,
 )
@@ -381,3 +384,123 @@ class TestSignalKClientSend:
         client._ws = mock_ws
         ok = await client.send('{"test": true}')
         assert ok is False
+
+
+# --------------------------------------------------------------------------- #
+# Meta delta tests                                                             #
+# --------------------------------------------------------------------------- #
+
+class TestBuildMetaDelta:
+    def test_returns_valid_json(self) -> None:
+        msg = build_meta_delta()
+        parsed = json.loads(msg)
+        assert "context" in parsed
+        assert "updates" in parsed
+
+    def test_default_context_is_vessels_self(self) -> None:
+        msg = build_meta_delta()
+        parsed = json.loads(msg)
+        assert parsed["context"] == "vessels.self"
+
+    def test_custom_context(self) -> None:
+        msg = build_meta_delta(self_context="vessels.urn:mrn:imo:mmsi:538071881")
+        parsed = json.loads(msg)
+        assert parsed["context"] == "vessels.urn:mrn:imo:mmsi:538071881"
+
+    def test_uses_meta_key_not_values(self) -> None:
+        """Meta deltas use 'meta' instead of 'values' in the update block."""
+        msg = build_meta_delta()
+        parsed = json.loads(msg)
+        update = parsed["updates"][0]
+        assert "meta" in update
+        assert "values" not in update
+
+    def test_meta_entries_have_path_and_value(self) -> None:
+        msg = build_meta_delta()
+        parsed = json.loads(msg)
+        meta = parsed["updates"][0]["meta"]
+        assert isinstance(meta, list)
+        assert len(meta) > 0
+        for entry in meta:
+            assert "path" in entry
+            assert "value" in entry
+            assert isinstance(entry["path"], str)
+            assert isinstance(entry["value"], dict)
+
+    def test_covers_all_wave_path_meta_entries(self) -> None:
+        """Every path in WAVE_PATH_META should appear in the meta delta."""
+        msg = build_meta_delta()
+        parsed = json.loads(msg)
+        meta = parsed["updates"][0]["meta"]
+        paths = {entry["path"] for entry in meta}
+        for path in WAVE_PATH_META:
+            assert path in paths, f"Missing meta for {path}"
+
+    def test_significant_height_has_units(self) -> None:
+        msg = build_meta_delta()
+        parsed = json.loads(msg)
+        meta = parsed["updates"][0]["meta"]
+        hs = next(e for e in meta if e["path"] == WAVE_SIGNIFICANT_HEIGHT)
+        assert hs["value"]["units"] == "m"
+        assert "description" in hs["value"]
+        assert "displayName" in hs["value"]
+
+    def test_motion_severity_has_display_scale(self) -> None:
+        msg = build_meta_delta()
+        parsed = json.loads(msg)
+        meta = parsed["updates"][0]["meta"]
+        from paths import WAVE_MOTION_SEVERITY
+        sev = next(e for e in meta if e["path"] == WAVE_MOTION_SEVERITY)
+        assert sev["value"]["units"] == "ratio"
+        assert "displayScale" in sev["value"]
+        scale = sev["value"]["displayScale"]
+        assert scale["lower"] == 0
+        assert scale["upper"] == 1
+
+    def test_motion_regime_has_enum(self) -> None:
+        msg = build_meta_delta()
+        parsed = json.loads(msg)
+        meta = parsed["updates"][0]["meta"]
+        from paths import WAVE_MOTION_REGIME
+        regime = next(e for e in meta if e["path"] == WAVE_MOTION_REGIME)
+        assert "enum" in regime["value"]
+        assert "calm" in regime["value"]["enum"]
+        assert "heavy" in regime["value"]["enum"]
+
+    def test_encounter_direction_has_enum(self) -> None:
+        msg = build_meta_delta()
+        parsed = json.loads(msg)
+        meta = parsed["updates"][0]["meta"]
+        from paths import WAVE_ENCOUNTER_DIRECTION
+        direction = next(e for e in meta if e["path"] == WAVE_ENCOUNTER_DIRECTION)
+        assert "enum" in direction["value"]
+        assert "beam_like" in direction["value"]["enum"]
+
+    def test_compact_json(self) -> None:
+        """Output should use compact separators (no extra whitespace
+        between JSON tokens).  Note: description strings may contain
+        ', ' naturally, so we parse and re-serialize to verify."""
+        msg = build_meta_delta()
+        parsed = json.loads(msg)
+        re_compact = json.dumps(parsed, separators=(",", ":"))
+        assert msg == re_compact
+
+    def test_no_source_or_timestamp_in_meta_update(self) -> None:
+        """Meta updates don't need source or timestamp."""
+        msg = build_meta_delta()
+        parsed = json.loads(msg)
+        update = parsed["updates"][0]
+        assert "source" not in update
+        assert "timestamp" not in update
+
+    def test_meta_values_are_dicts_not_references(self) -> None:
+        """Meta values should be independent dicts (not shared references
+        with WAVE_PATH_META)."""
+        msg = build_meta_delta()
+        parsed = json.loads(msg)
+        meta = parsed["updates"][0]["meta"]
+        for entry in meta:
+            path = entry["path"]
+            # Mutating the parsed output should not affect the source dict
+            entry["value"]["_test_key"] = True
+            assert "_test_key" not in WAVE_PATH_META[path]

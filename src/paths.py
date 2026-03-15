@@ -213,3 +213,93 @@ PUBLISH_PATHS: List[str] = [
     WAVE_COMFORT_PROXY,
     WAVE_PERIOD_CONFIDENCE,
 ]
+
+# --------------------------------------------------------------------------- #
+# Wave path metadata (units, descriptions, display names)                     #
+# --------------------------------------------------------------------------- #
+# Sent as a Signal K meta delta on startup so gauges and dashboards can
+# show proper units and labels.  Keys match the publish paths above.
+
+WAVE_PATH_META: Dict[str, Dict[str, object]] = {
+    WAVE_SIGNIFICANT_HEIGHT: {
+        "units": "m",
+        "description": "Estimated significant wave height (Hs) from vessel motion",
+        "displayName": "Wave Height (Hs)",
+        "shortName": "Hs",
+    },
+    WAVE_PERIOD: {
+        "units": "s",
+        "description": "Dominant wave period as encountered by the vessel",
+        "displayName": "Wave Period",
+        "shortName": "T",
+    },
+    WAVE_DIRECTION_TRUE: {
+        "units": "rad",
+        "description": "True direction waves are coming from, relative to true north",
+        "displayName": "Wave Direction",
+        "shortName": "Dir",
+    },
+    HEAVE: {
+        "units": "m",
+        "description": "Vertical displacement (heave) from Kalman-filtered accelerometer",
+        "displayName": "Heave",
+        "shortName": "Heave",
+    },
+    WAVE_ENCOUNTER_PERIOD: {
+        "units": "s",
+        "description": "Wave encounter period as observed by the vessel (not Doppler-corrected)",
+        "displayName": "Encounter Period",
+        "shortName": "Te",
+    },
+    WAVE_TRUE_PERIOD: {
+        "units": "s",
+        "description": "True wave period after Doppler correction for vessel speed",
+        "displayName": "True Period",
+        "shortName": "Tt",
+    },
+    WAVE_TRUE_WAVELENGTH: {
+        "units": "m",
+        "description": "True wavelength after Doppler correction (deep-water dispersion)",
+        "displayName": "Wavelength",
+        "shortName": "λ",
+    },
+    WAVE_MOTION_SEVERITY: {
+        "units": "ratio",
+        "description": "Composite motion severity index (0 = calm, 1 = extreme)",
+        "displayName": "Motion Severity",
+        "shortName": "Sev",
+        "displayScale": {"lower": 0, "upper": 1, "type": "linear"},
+    },
+    WAVE_MOTION_REGIME: {
+        "description": "Motion regime classification",
+        "displayName": "Motion Regime",
+        "shortName": "Regime",
+        "enum": ["calm", "moderate", "active", "heavy"],
+    },
+    WAVE_ENCOUNTER_DIRECTION: {
+        "description": "Wave encounter direction relative to vessel heading",
+        "displayName": "Encounter Direction",
+        "shortName": "Dir",
+        "enum": [
+            "head_or_following_like",
+            "beam_like",
+            "quartering_like",
+            "confused_like",
+            "mixed",
+        ],
+    },
+    WAVE_COMFORT_PROXY: {
+        "units": "ratio",
+        "description": "Comfort proxy combining motion severity and regularity (0 = comfortable, 1 = uncomfortable)",
+        "displayName": "Comfort",
+        "shortName": "Cmft",
+        "displayScale": {"lower": 0, "upper": 1, "type": "linear"},
+    },
+    WAVE_PERIOD_CONFIDENCE: {
+        "units": "ratio",
+        "description": "Confidence in dominant period estimate (0 = low, 1 = high)",
+        "displayName": "Period Confidence",
+        "shortName": "Tconf",
+        "displayScale": {"lower": 0, "upper": 1, "type": "linear"},
+    },
+}
