@@ -566,14 +566,16 @@ def rao_gain(
         t_res = hull_params.resonant_period
 
         # Hull-type-dependent peak gain and bandwidth
+        # Conservative values: the RAO model is approximate and uncalibrated.
+        # The Phase 3 online learner will refine these over time.
         if hull_params.hull_type == HullType.CATAMARAN:
-            peak = 1.8    # cats are stiffer → sharper resonance
-            bw = 0.6      # narrower bandwidth
+            peak = 1.25   # conservative until learner calibrates
+            bw = 0.8      # moderate bandwidth
         elif hull_params.hull_type == HullType.TRIMARAN:
-            peak = 1.6
-            bw = 0.8
+            peak = 1.20
+            bw = 0.9
         else:
-            peak = 1.5    # monohull: broader, lower peak
+            peak = 1.15   # monohull: broader, lower peak
             bw = 1.0
 
         # Lorentzian resonance curve
@@ -585,11 +587,11 @@ def rao_gain(
         t_beam = hull_params.beam_resonant_period
 
         if hull_params.hull_type == HullType.CATAMARAN:
-            beam_peak = 1.4   # beam spans full wavelength
-            beam_bw = 0.5
-        else:
-            beam_peak = 1.2
+            beam_peak = 1.15  # conservative
             beam_bw = 0.6
+        else:
+            beam_peak = 1.10
+            beam_bw = 0.7
 
         delta_beam = (wave_period_s - t_beam) / beam_bw
         gain += (beam_peak - 1.0) / (1.0 + delta_beam * delta_beam)

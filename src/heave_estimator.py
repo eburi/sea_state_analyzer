@@ -567,8 +567,26 @@ def estimate_waves_from_accel(
     if psd_valid.max() == 0:
         return result
 
-    idx = int(np.argmax(psd_valid))
+    # Weight PSD by 1/f² for peak detection.  Ocean wave energy scales
+    # roughly as f^{-4} (Pierson–Moskowitz / JONSWAP), but the raw
+    # acceleration PSD scales as f^{+2} relative to displacement PSD
+    # (acceleration = -ω²·displacement).  Dividing by f² converts the
+    # *acceleration* PSD back to a *displacement* PSD, so the peak
+    # corresponds to the dominant wave period rather than high-frequency
+    # boat vibration or slamming.
+    psd_disp = psd_valid.copy()
+    freq_sq = freqs ** 2
+    freq_sq[freq_sq < 1e-6] = 1e-6  # avoid division by zero at DC
+    psd_disp /= freq_sq
+
+    if psd_disp[valid_mask].max() == 0:
+        return result
+
+    idx = int(np.argmax(psd_disp))
     dom_freq = float(freqs[idx])
+
+    # Confidence: use the raw (unweighted) PSD peak-to-mean ratio so
+    # that the metric still reflects how sharp the spectral peak is.
     peak_power = float(psd_valid[idx])
     mean_power = float(psd_valid[valid_mask].mean()) + 1e-12
     confidence = min(1.0, (peak_power / mean_power) / 10.0)

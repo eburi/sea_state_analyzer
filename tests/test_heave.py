@@ -422,8 +422,9 @@ class TestEstimateWavesFromAccel:
         # Should be near 0.2 Hz (allow some PSD bin width tolerance)
         assert 0.1 < result.accel_dominant_freq < 0.5
 
-    def test_freq_band_without_upper_bound_finds_vibration(self) -> None:
-        """Without upper bound, PSD would find the 5 Hz vibration peak."""
+    def test_freq_band_without_upper_bound_favours_low_freq(self) -> None:
+        """With 1/f² displacement weighting, PSD favours the ocean wave even
+        when high-frequency vibration has larger raw acceleration amplitude."""
         fs = 50.0
         duration = 60.0
         t = np.arange(0, duration, 1.0 / fs)
@@ -431,12 +432,14 @@ class TestEstimateWavesFromAccel:
         engine = 1.0 * np.sin(2 * math.pi * 5.0 * t)
         accel = ocean + engine
 
-        # With freq_max_hz=25 (Nyquist), should find the 5 Hz vibration
+        # Even with freq_max_hz=25 (Nyquist), 1/f² weighting should still
+        # find the 0.2 Hz ocean wave because displacement energy dominates
         result = estimate_waves_from_accel(
             accel, fs=fs, freq_max_hz=25.0,
         )
         assert result.accel_dominant_freq is not None
-        assert result.accel_dominant_freq > 3.0
+        assert result.accel_dominant_freq < 1.0
+        assert 0.1 < result.accel_dominant_freq < 0.5
 
     def test_trochoidal_min_amplitude_lowered(self) -> None:
         """With lower min_amplitude, small waves that were previously rejected

@@ -674,20 +674,20 @@ class TestRAOGain:
         return compute_hull_parameters(design)
 
     def test_gain_at_resonance_peak_catamaran(self, catamaran_params: HullParameters) -> None:
-        """Gain at resonant period should be near the peak value (~1.8 for cat)."""
+        """Gain at resonant period should be near the peak value (~1.25 for cat)."""
         t_res = catamaran_params.resonant_period
         assert t_res is not None
         gain = rao_gain(t_res, catamaran_params)
-        # Primary peak = 1.8, plus beam resonance contribution
-        assert gain > 1.5
+        # Conservative primary peak = 1.25, plus beam resonance contribution
+        assert gain > 1.2
 
     def test_gain_at_resonance_peak_monohull(self, monohull_params: HullParameters) -> None:
         """Monohull peak gain should be lower than catamaran."""
         t_res = monohull_params.resonant_period
         assert t_res is not None
         gain_mono = rao_gain(t_res, monohull_params)
-        # Monohull primary peak = 1.5
-        assert gain_mono > 1.3
+        # Conservative monohull primary peak = 1.15
+        assert gain_mono > 1.1
 
     def test_catamaran_peak_higher_than_monohull(
         self, catamaran_params: HullParameters, monohull_params: HullParameters
@@ -758,8 +758,8 @@ class TestRAOGain:
         t_res = params.resonant_period
         assert t_res is not None
         gain = rao_gain(t_res, params)
-        # Should still have a peak
-        assert gain > 1.3
+        # Should still have a peak (conservative values)
+        assert gain > 1.1
 
     def test_trimaran_intermediate_peak(self) -> None:
         """Trimaran peak should be between monohull and catamaran."""
@@ -769,8 +769,8 @@ class TestRAOGain:
         t_res = params.resonant_period
         assert t_res is not None
         gain = rao_gain(t_res, params)
-        # Trimaran peak = 1.6
-        assert 1.4 < gain < 2.5
+        # Conservative trimaran peak = 1.20
+        assert 1.1 < gain < 1.5
 
 
 # ========================================================================= #
@@ -1002,9 +1002,9 @@ class TestFeatureExtractorHullIntegration:
             encounter_period_estimate=20.0,  # far from resonance
         )
         ext._apply_rao_correction(me)
-        # Should use true_wave_period (resonance) -> significant correction
+        # Should use true_wave_period (resonance) -> correction applied
         assert me.rao_gain_applied is not None
-        assert me.rao_gain_applied > 1.5
+        assert me.rao_gain_applied > 1.2
 
     def test_apply_rao_correction_adjusts_confidence(self) -> None:
         """Hs confidence should be reduced near hull resonance."""
