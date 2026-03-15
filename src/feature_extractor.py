@@ -38,6 +38,20 @@ try:
 except ImportError:
     _HEAVE_AVAILABLE = False
 
+# Vessel hull parameters (optional -- degrades gracefully)
+try:
+    from vessel_config import HullParameters, rao_gain, rao_confidence_adjustment
+    _HULL_AVAILABLE = True
+except ImportError:
+    _HULL_AVAILABLE = False
+
+# Online sea-state learner (optional -- degrades gracefully)
+try:
+    from sea_state_learner import SeaStateLearner
+    _LEARNER_AVAILABLE = True
+except ImportError:
+    _LEARNER_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -332,9 +346,20 @@ class FeatureExtractor:
     estimates are available via get_window_features() and get_motion_estimate().
     """
 
-    def __init__(self, config: Config = DEFAULT_CONFIG) -> None:
+    def __init__(
+        self,
+        config: Config = DEFAULT_CONFIG,
+        hull_params: Optional[Any] = None,
+        learner: Optional[Any] = None,
+    ) -> None:
         self._config = config
         self._fs = config.sample_rate_hz
+
+        # Hull parameters for Phase 2 corrections (None = use defaults)
+        self._hull_params: Optional[Any] = hull_params if _HULL_AVAILABLE else None
+
+        # Online sea-state learner for Phase 3 (None = disabled)
+        self._learner: Optional[Any] = learner if _LEARNER_AVAILABLE else None
 
         # Rolling sample buffers keyed by window size in seconds
         self._buffers: Dict[int, Deque[InstantSample]] = {
@@ -716,10 +741,13 @@ class FeatureExtractor:
         me.severity_trend = self._estimate_trend(now)
 
         # ---- overall confidence ---- #
-        me.overall_confidence = _overall_confidence(wf, me)
+        me.overall_confidence = _overall_confidence(wf, me, self._hull_params)
 
         # ---- wave height estimation from IMU accel data ---- #
         self._apply_wave_estimation(me, wf)
+
+        # ---- Phase 3: online learning observation + correction ---- #
+        self._apply_learned_correction(me)
 
         return me
 
@@ -908,32 +936,144 @@ class FeatureExtractor:
         if wave_est.accel_freq_confidence is not None:
             me.accel_freq_confidence = round(wave_est.accel_freq_confidence, 3)
 
+        # RAO correction: if hull parameters are available, correct Hs for
+        # hull amplification/attenuation at the observed wave period.
+        self._apply_rao_correction(me)
+
+    def _apply_rao_correction(self, me: MotionEstimate) -> None:
+        """Apply RAO gain correction to wave height and adjust confidence.
+
+        If hull parameters are available, determines the RAO gain at the
+        observed wave period and divides Hs by the gain (removing hull
+        amplification).  Also adjusts wave_height_confidence using the
+        rao_confidence_adjustment helper.
+
+        Populates ``me.rao_gain_applied`` for logging/debugging.
+        """
+        if not _HULL_AVAILABLE or self._hull_params is None:
+            return
+        if me.significant_height is None:
+            return
+
+        # Best available period: prefer true (Doppler-corrected), then
+        # accel-derived encounter period, then attitude-derived estimate.
+        period = (
+            me.true_wave_period
+            or me.accel_dominant_period
+            or me.encounter_period_estimate
+        )
+        if period is None or period <= 0:
+            return
+
+        gain = rao_gain(period, self._hull_params)
+        me.rao_gain_applied = round(gain, 4)
+
+        # Correct significant height: divide out hull amplification
+        me.significant_height = round(me.significant_height / gain, 3)
+
+        # Adjust wave height confidence
+        _period_boost, hs_penalty = rao_confidence_adjustment(
+            period, self._hull_params
+        )
+        if me.wave_height_confidence is not None:
+            me.wave_height_confidence = round(
+                float(np.clip(me.wave_height_confidence * hs_penalty, 0.0, 1.0)),
+                3,
+            )
+
+    def _apply_learned_correction(self, me: MotionEstimate) -> None:
+        """Phase 3: observe + apply learned vessel-specific correction.
+
+        1. Feed the current estimate into the learner for accumulation.
+        2. If the learner has sufficient data, apply its correction factor
+           to significant_height.
+
+        The learner correction is multiplicative on top of the RAO correction
+        (Phase 2).  It captures vessel-specific deviations from the generic
+        RAO model.
+        """
+        if not _LEARNER_AVAILABLE or self._learner is None:
+            return
+
+        # Best available period for bin selection
+        period = (
+            me.true_wave_period
+            or me.accel_dominant_period
+            or me.encounter_period_estimate
+        )
+
+        # Observe (accumulate into bin)
+        self._learner.observe(
+            wave_period=period,
+            encounter_direction=me.encounter_direction,
+            motion_severity=me.motion_severity_smoothed,
+            significant_height=me.significant_height,
+        )
+
+        # Apply learned correction to Hs if available
+        if me.significant_height is not None and period is not None:
+            factor = self._learner.correction_factor(
+                wave_period=period,
+                encounter_direction=me.encounter_direction,
+            )
+            if factor != 1.0:
+                me.significant_height = round(me.significant_height * factor, 3)
+                logger.debug(
+                    "Learned correction: period=%.1fs dir=%s factor=%.3f",
+                    period, me.encounter_direction, factor,
+                )
+
     def _compute_severity(self, wf: WindowFeatures) -> float:
         cfg = self._config
+        hp = self._hull_params
         scores: Dict[str, float] = {}
 
+        # Use hull-type-specific max thresholds if available, else config defaults
+        if hp is not None and hp.severity_max_overrides:
+            roll_rms_max = hp.severity_max_overrides.get(
+                "severity_roll_rms_max", cfg.severity_roll_rms_max
+            )
+            pitch_rms_max = hp.severity_max_overrides.get(
+                "severity_pitch_rms_max", cfg.severity_pitch_rms_max
+            )
+            roll_spectral_max = hp.severity_max_overrides.get(
+                "severity_roll_spectral_max", cfg.severity_roll_spectral_max
+            )
+            yaw_rate_var_max = hp.severity_max_overrides.get(
+                "severity_yaw_rate_var_max", cfg.severity_yaw_rate_var_max
+            )
+        else:
+            roll_rms_max = cfg.severity_roll_rms_max
+            pitch_rms_max = cfg.severity_pitch_rms_max
+            roll_spectral_max = cfg.severity_roll_spectral_max
+            yaw_rate_var_max = cfg.severity_yaw_rate_var_max
+
         if wf.roll_rms is not None:
-            scores["roll_rms"] = min(1.0, wf.roll_rms / cfg.severity_roll_rms_max)
+            scores["roll_rms"] = min(1.0, wf.roll_rms / roll_rms_max)
         if wf.pitch_rms is not None:
-            scores["pitch_rms"] = min(1.0, wf.pitch_rms / cfg.severity_pitch_rms_max)
+            scores["pitch_rms"] = min(1.0, wf.pitch_rms / pitch_rms_max)
         if wf.roll_spectral_energy is not None:
             scores["roll_spectral"] = min(
-                1.0, wf.roll_spectral_energy / cfg.severity_roll_spectral_max
+                1.0, wf.roll_spectral_energy / roll_spectral_max
             )
         if wf.yaw_rate_var is not None:
             scores["yaw_rate_var"] = min(
-                1.0, wf.yaw_rate_var / cfg.severity_yaw_rate_var_max
+                1.0, wf.yaw_rate_var / yaw_rate_var_max
             )
 
         if not scores:
             return 0.0
 
-        total_weight = sum(cfg.severity_weights.get(k, 0.0) for k in scores)
+        # Use hull-type-specific weights if available, else config defaults
+        weights = (hp.severity_weights if hp is not None and hp.severity_weights
+                   else cfg.severity_weights)
+
+        total_weight = sum(weights.get(k, 0.0) for k in scores)
         if total_weight == 0:
             return 0.0
 
         weighted = sum(
-            scores[k] * cfg.severity_weights.get(k, 0.0) for k in scores
+            scores[k] * weights.get(k, 0.0) for k in scores
         )
         return float(weighted / total_weight)
 
@@ -1097,8 +1237,17 @@ def _comfort_proxy(wf: WindowFeatures, severity_smoothed: float) -> float:
     return float(np.clip(0.7 * severity_smoothed + 0.3 * cf_penalty, 0.0, 1.0))
 
 
-def _overall_confidence(wf: WindowFeatures, me: MotionEstimate) -> float:
-    """Heuristic overall confidence 0–1 based on data completeness."""
+def _overall_confidence(
+    wf: WindowFeatures,
+    me: MotionEstimate,
+    hull_params: Optional[Any] = None,
+) -> float:
+    """Heuristic overall confidence 0–1 based on data completeness.
+
+    When hull_params is provided, applies resonance-aware adjustments:
+    - Period confidence boosted when dominant period is near natural period
+    - Wave height confidence penalised when near hull resonance (amplified)
+    """
     checks = [
         wf.roll_rms is not None,
         wf.pitch_rms is not None,
@@ -1112,4 +1261,14 @@ def _overall_confidence(wf: WindowFeatures, me: MotionEstimate) -> float:
     # Penalise high confusion
     confusion = me.confusion_index or 0.5
     penalised = base * (1.0 - 0.4 * confusion)
+
+    # Resonance-aware adjustments
+    if hull_params is not None and _HULL_AVAILABLE:
+        period = me.encounter_period_estimate
+        if period is not None and period > 0:
+            period_boost, hs_penalty = rao_confidence_adjustment(period, hull_params)
+            # Boost overall confidence if period is near natural period
+            # (vessel responds strongly = clear signal for detection)
+            penalised *= period_boost
+
     return float(np.clip(penalised, 0.0, 1.0))

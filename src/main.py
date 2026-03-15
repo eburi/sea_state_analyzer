@@ -44,6 +44,18 @@ from recorder import Recorder
 from signalk_client import InspectClient, SignalKClient
 from state_store import SelfStateStore
 
+# Try importing vessel design module
+try:
+    from vessel_config import (
+        compute_hull_parameters,
+        fetch_vessel_design,
+        log_hull_parameters,
+        HullParameters,
+    )
+    _VESSEL_CONFIG_AVAILABLE = True
+except ImportError:
+    _VESSEL_CONFIG_AVAILABLE = False
+
 # Try importing publisher
 try:
     from signalk_publisher import build_delta_message, build_meta_delta
@@ -57,6 +69,13 @@ try:
     _AUTH_AVAILABLE = True
 except ImportError:
     _AUTH_AVAILABLE = False
+
+# Try importing sea state learner
+try:
+    from sea_state_learner import SeaStateLearner
+    _LEARNER_AVAILABLE = True
+except ImportError:
+    _LEARNER_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +131,6 @@ async def _live_mode(config: Config) -> None:
 
     client = SignalKClient(config)
     store = SelfStateStore(config)
-    extractor = FeatureExtractor(config)
     recorder = Recorder(output_dir, config)
     term_plotter = TerminalPlotter(config)
     file_plotter = FilePlotter(output_dir, config)
@@ -121,6 +139,36 @@ async def _live_mode(config: Config) -> None:
 
     # Check server availability (non-blocking; failure does not abort)
     await client.check_availability()
+
+    # --- Vessel design fetch (best-effort) -------------------------------- #
+    hull_params: Optional[HullParameters] = None  # type: ignore[name-defined]
+    if _VESSEL_CONFIG_AVAILABLE:
+        try:
+            design = await fetch_vessel_design(config.base_url)
+            if design is not None and design.has_minimum_data:
+                hull_params = compute_hull_parameters(design)
+                log_hull_parameters(hull_params)
+            elif design is not None:
+                logger.info("Vessel design fetched but insufficient data (no LOA)")
+            else:
+                logger.info("Vessel design not available — using default hull parameters")
+        except Exception as exc:
+            logger.warning("Vessel design fetch failed: %s — using defaults", exc)
+    else:
+        logger.info("vessel_config module not available — hull corrections disabled")
+
+    # Create extractor after vessel design fetch so hull_params can be passed
+    # --- Phase 3: Sea-state learner (online learning) --------------------- #
+    learner = None
+    if _LEARNER_AVAILABLE:
+        persist_path = config.learner_persist_path
+        learner = SeaStateLearner(persist_path=persist_path)
+        learner.load()
+        logger.info("Sea-state learner initialised (persist=%s)", persist_path)
+    else:
+        logger.info("sea_state_learner module not available — online learning disabled")
+
+    extractor = FeatureExtractor(config, hull_params=hull_params, learner=learner)
 
     # --- Auth setup (concurrent — does not block other tasks) ------------- #
     # The auth_ready event is set once a valid token is obtained (or auth
@@ -511,6 +559,10 @@ async def _live_mode(config: Config) -> None:
         if imu_reader is not None:
             imu_reader.close()
         recorder.close()
+        # Save learned model on shutdown
+        if learner is not None:
+            learner.save()
+            logger.info("Sea-state learner summary: %s", learner.summary())
         if config.enable_live_plots:
             file_plotter.plot_all(
                 list(plot_sample_buf), {}, list(plot_estimate_buf)

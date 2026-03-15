@@ -144,6 +144,12 @@ class Config:
     auth_poll_interval_s: float = 5.0
 
     # ------------------------------------------------------------------ #
+    # Online learning (Phase 3)                                            #
+    # ------------------------------------------------------------------ #
+    # Path to persist the learned vessel RAO model.
+    learner_persist_path: str = "/data/vessel_rao.json"
+
+    # ------------------------------------------------------------------ #
     # Heave / wave height estimation                                       #
     # ------------------------------------------------------------------ #
     # Kalman filter tuning (Sharkh et al. 2014)

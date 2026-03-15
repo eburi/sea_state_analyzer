@@ -279,6 +279,9 @@ class MotionEstimate:
     # Trend compared to a longer window: improving / worsening / stable
     severity_trend: Optional[str] = None
 
+    # RAO correction applied (hull amplification factor at observed period)
+    rao_gain_applied: Optional[float] = None
+
     # Overall confidence in the estimates
     overall_confidence: Optional[float] = None
 
