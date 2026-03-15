@@ -169,3 +169,47 @@ ANGLE_PATHS = {
     CURRENT_SET_TRUE,
     RUDDER_ANGLE,
 }
+
+# --------------------------------------------------------------------------- #
+# Wave estimate publish paths (outgoing — written by this app)                #
+# --------------------------------------------------------------------------- #
+# These are custom paths published back to Signal K.  They are not part of
+# the Signal K v1.5 spec but are accepted by signalk-server-node as custom
+# data.  environment.heave IS in the spec.
+#
+# All values follow SI / Signal K conventions:
+#   Heights  – metres
+#   Periods  – seconds
+#   Angles   – radians  (directionTrue is compass bearing of wave travel)
+#   Severity – dimensionless 0–1
+
+WAVE_SIGNIFICANT_HEIGHT = "environment.water.waves.significantHeight"  # metres
+WAVE_PERIOD = "environment.water.waves.period"                        # seconds
+WAVE_DIRECTION_TRUE = "environment.water.waves.directionTrue"         # radians
+HEAVE = "environment.heave"                                           # metres (in SK spec)
+
+# Additional detail paths
+WAVE_ENCOUNTER_PERIOD = "environment.water.waves.encounterPeriod"     # seconds
+WAVE_TRUE_PERIOD = "environment.water.waves.truePeriod"               # seconds (Doppler-corrected)
+WAVE_TRUE_WAVELENGTH = "environment.water.waves.trueWavelength"       # metres
+WAVE_MOTION_SEVERITY = "environment.water.waves.motionSeverity"       # 0–1
+WAVE_MOTION_REGIME = "environment.water.waves.motionRegime"           # calm/moderate/active/heavy
+WAVE_ENCOUNTER_DIRECTION = "environment.water.waves.encounterDirection"  # beam/head/following/quartering
+WAVE_COMFORT_PROXY = "environment.water.waves.comfortProxy"           # 0–1
+WAVE_PERIOD_CONFIDENCE = "environment.water.waves.periodConfidence"    # 0–1
+
+# All publish paths for iteration
+PUBLISH_PATHS: List[str] = [
+    WAVE_SIGNIFICANT_HEIGHT,
+    WAVE_PERIOD,
+    WAVE_DIRECTION_TRUE,
+    HEAVE,
+    WAVE_ENCOUNTER_PERIOD,
+    WAVE_TRUE_PERIOD,
+    WAVE_TRUE_WAVELENGTH,
+    WAVE_MOTION_SEVERITY,
+    WAVE_MOTION_REGIME,
+    WAVE_ENCOUNTER_DIRECTION,
+    WAVE_COMFORT_PROXY,
+    WAVE_PERIOD_CONFIDENCE,
+]

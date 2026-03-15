@@ -1,8 +1,10 @@
-"""ICM-20948 9-DOF IMU reader over I2C.
+"""IMU reader over I2C with auto-detection.
 
 Reads accelerometer (g), gyroscope (deg/s), magnetometer (µT), and
-temperature (°C) from the InvenSense ICM-20948 + AK09916 combo chip
-via smbus2.
+temperature (°C) from supported IMU chips (currently ICM-20948) via smbus2.
+
+When auto-detection is enabled the reader probes the I2C bus for known
+chips (see imu_registry.py / imu_detect.py) before attempting init.
 
 Design goals:
 - Self-contained: no dependency beyond smbus2 (standard on Pi)
@@ -12,7 +14,7 @@ Design goals:
 
 Typical usage::
 
-    reader = await IMUReader.create(bus_number=1)
+    reader = await IMUReader.create(bus_number=1, auto_detect=True)
     if reader is not None:
         sample = await reader.read_sample()
         print(sample)
@@ -326,28 +328,79 @@ class IMUReader:
 
     Use the ``create()`` class method to instantiate — it returns None
     when the hardware is absent (e.g. running on a Mac).
+
+    When *auto_detect* is True (the default), the factory probes the
+    I2C bus for known IMU chips before falling back to the given address.
     """
 
-    def __init__(self, driver: _ICM20948Driver) -> None:
+    def __init__(self, driver: _ICM20948Driver, *, chip_name: str = "ICM-20948") -> None:
         self._driver = driver
+        self._chip_name = chip_name
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    @property
+    def chip_name(self) -> str:
+        """Name of the detected/configured chip."""
+        return self._chip_name
 
     @classmethod
     async def create(
         cls,
         bus_number: int = 1,
         address: int = _I2C_ADDR,
+        auto_detect: bool = True,
     ) -> Optional["IMUReader"]:
-        """Try to open the IMU.  Returns None if hardware is unavailable."""
+        """Try to open the IMU.  Returns None if hardware is unavailable.
+
+        When *auto_detect* is True, scans the bus for known IMU chips
+        before falling back to *address*.  Currently only ICM-20948 has
+        a full driver; other detected chips are logged but the reader
+        still attempts ICM-20948 init at the detected address.
+        """
+        detected_chip_name = "ICM-20948"
+        effective_address = address
+
+        if auto_detect:
+            try:
+                from imu_detect import detect_imu_on_bus
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(
+                    None, lambda: detect_imu_on_bus(bus_number)
+                )
+                if result is not None:
+                    detected_chip_name = result.chip.chip_name
+                    effective_address = result.address
+                    logger.info(
+                        "Auto-detected %s at bus=%d addr=0x%02X",
+                        detected_chip_name, bus_number, effective_address,
+                    )
+                    if detected_chip_name != "ICM-20948":
+                        logger.warning(
+                            "Detected %s but only ICM-20948 driver is implemented; "
+                            "attempting ICM-20948 init at 0x%02X anyway",
+                            detected_chip_name, effective_address,
+                        )
+                else:
+                    logger.info(
+                        "Auto-detect found no known IMU on bus %d; "
+                        "falling back to addr=0x%02X",
+                        bus_number, address,
+                    )
+            except Exception as exc:
+                logger.debug("Auto-detect failed: %s — falling back to 0x%02X", exc, address)
+
         try:
             loop = asyncio.get_running_loop()
             driver = await loop.run_in_executor(
-                None, lambda: _ICM20948Driver(bus_number, address)
+                None, lambda: _ICM20948Driver(bus_number, effective_address)
             )
             await loop.run_in_executor(None, driver.init)
-            reader = cls(driver)
+            reader = cls(driver, chip_name=detected_chip_name)
             reader._loop = loop
-            logger.info("IMU reader ready (bus=%d, addr=0x%02X)", bus_number, address)
+            logger.info(
+                "IMU reader ready (%s, bus=%d, addr=0x%02X)",
+                detected_chip_name, bus_number, effective_address,
+            )
             return reader
         except Exception as exc:
             logger.info("IMU not available: %s", exc)

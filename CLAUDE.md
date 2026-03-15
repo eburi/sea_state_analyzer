@@ -53,6 +53,9 @@ src/
   signalk_client.py    – WebSocket client, reconnect backoff, explicit subscriptions
   state_store.py       – latest-known self-state, freshness tracking, InstantSample snapshots
   feature_extractor.py – Layer A (derivatives), Layer B (rolling stats/PSD), Layer C (inferred proxies)
+  imu_registry.py      – IMU chip registry (WHO_AM_I values, I2C addresses) for auto-detection
+  imu_detect.py        – I2C bus scanning and chip identification using the registry
+  imu_reader.py        – ICM-20948 driver + async wrapper with auto-detect support
   recorder.py          – batched JSONL + Parquet output
   plotter.py           – console summaries + optional matplotlib PNGs
   main.py              – CLI entry point: live / inspect / replay modes
@@ -60,6 +63,8 @@ tests/
   test_parsing.py      – delta parsing, self-path filtering, state store
   test_features.py     – angle unwrapping, PSD, spectral features, regime classification
   test_rolling.py      – rolling window statistics and multi-window behaviour
+  test_imu.py          – ICM-20948 driver, async wrapper, IMU merge logic
+  test_imu_detect.py   – IMU registry, I2C scanning, chip identification
 conftest.py            – adds src/ to sys.path for pytest
 ```
 

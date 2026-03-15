@@ -115,13 +115,21 @@ class Config:
     doppler_min_stw: float = 0.5  # ~1 knot
 
     # ------------------------------------------------------------------ #
-    # IMU (ICM-20948)                                                      #
+    # IMU                                                                  #
     # ------------------------------------------------------------------ #
     imu_enabled: bool = True          # attempt IMU init; False disables
     imu_bus_number: int = 1           # i2c bus (RPi default = 1)
-    imu_address: int = 0x68           # ICM-20948 default address
+    imu_auto_detect: bool = True      # scan I2C for known IMU chips
+    imu_address: int = 0x68           # fallback address if auto-detect off/fails
     imu_sample_rate_hz: float = 50.0  # target IMU poll rate
     imu_include_mag: bool = True      # include magnetometer (slower)
+
+    # ------------------------------------------------------------------ #
+    # Signal K publishing                                                  #
+    # ------------------------------------------------------------------ #
+    publish_to_signalk: bool = True    # send wave estimates back to SK
+    publish_interval_s: float = 5.0   # seconds between publishes
+    publish_source_label: str = "boat_wave_state"
 
     # ------------------------------------------------------------------ #
     # Derivative computation                                               #
@@ -219,6 +227,10 @@ class Config:
         if ib is not None:
             kwargs["imu_bus_number"] = ib
 
+        iad = _env_bool("IMU_AUTO_DETECT")
+        if iad is not None:
+            kwargs["imu_auto_detect"] = iad
+
         ia = _env_int("IMU_ADDRESS")
         if ia is not None:
             kwargs["imu_address"] = ia
@@ -230,6 +242,10 @@ class Config:
         im = _env_bool("IMU_INCLUDE_MAG")
         if im is not None:
             kwargs["imu_include_mag"] = im
+
+        ps = _env_bool("PUBLISH_TO_SIGNALK")
+        if ps is not None:
+            kwargs["publish_to_signalk"] = ps
 
         ep = _env_bool("ENABLE_PLOTS")
         if ep is not None:

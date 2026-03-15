@@ -43,6 +43,13 @@ from recorder import Recorder
 from signalk_client import InspectClient, SignalKClient
 from state_store import SelfStateStore
 
+# Try importing publisher
+try:
+    from signalk_publisher import build_delta_message
+    _PUBLISHER_AVAILABLE = True
+except ImportError:
+    _PUBLISHER_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # Try importing IMU reader — absent on Mac / without smbus2
@@ -116,14 +123,16 @@ async def _live_mode(config: Config) -> None:
     latest_imu_sample: Optional["IMUSample"] = None  # type: ignore[name-defined]
 
     if config.imu_enabled and _IMU_AVAILABLE:
-        logger.info("Attempting IMU init on i2c bus %d addr 0x%02X…",
-                     config.imu_bus_number, config.imu_address)
+        logger.info("Attempting IMU init on i2c bus %d (auto_detect=%s, fallback_addr=0x%02X)…",
+                     config.imu_bus_number, config.imu_auto_detect, config.imu_address)
         imu_reader = await IMUReader.create(
             bus_number=config.imu_bus_number,
             address=config.imu_address,
+            auto_detect=config.imu_auto_detect,
         )
         if imu_reader is not None:
-            logger.info("IMU reader active – sampling at %.0f Hz", config.imu_sample_rate_hz)
+            logger.info("IMU reader active (%s) – sampling at %.0f Hz",
+                        imu_reader.chip_name, config.imu_sample_rate_hz)
         else:
             logger.info("IMU not available – continuing without accelerometer data")
     elif not _IMU_AVAILABLE:
@@ -277,6 +286,42 @@ async def _live_mode(config: Config) -> None:
             await asyncio.sleep(30.0)
             recorder.flush_all()
 
+    async def _publish_loop() -> None:
+        """Publish latest MotionEstimate to Signal K at configured interval.
+
+        Sends delta messages through the SignalKClient's active WebSocket.
+        Skips silently when no estimate is available, the client is
+        disconnected, or publishing is disabled.
+        """
+        publish_count = 0
+        fail_count = 0
+        while True:
+            await asyncio.sleep(config.publish_interval_s)
+            me = last_me
+            if me is None:
+                continue
+            msg = build_delta_message(
+                me,
+                self_context=client.self_context,
+                source_label=config.publish_source_label,
+            )
+            if msg is None:
+                continue
+            ok = await client.send(msg)
+            if ok:
+                publish_count += 1
+                if publish_count <= 3 or publish_count % 100 == 0:
+                    logger.info(
+                        "Published wave delta #%d (%d bytes)",
+                        publish_count, len(msg),
+                    )
+            else:
+                fail_count += 1
+                if fail_count <= 3 or fail_count % 100 == 0:
+                    logger.debug(
+                        "Publish skipped #%d (not connected)", fail_count,
+                    )
+
     # Run all tasks concurrently
     tasks = [
         asyncio.create_task(client.run(delta_queue), name="signalk_client"),
@@ -288,6 +333,13 @@ async def _live_mode(config: Config) -> None:
     ]
     if imu_reader is not None:
         tasks.append(asyncio.create_task(_imu_loop(), name="imu"))
+    if config.publish_to_signalk and _PUBLISHER_AVAILABLE:
+        tasks.append(asyncio.create_task(_publish_loop(), name="publisher"))
+        logger.info("Signal K publishing enabled (every %.0fs)", config.publish_interval_s)
+    elif config.publish_to_signalk and not _PUBLISHER_AVAILABLE:
+        logger.warning("publish_to_signalk=True but signalk_publisher module not available")
+    else:
+        logger.info("Signal K publishing disabled in config")
 
     try:
         await asyncio.gather(*tasks)

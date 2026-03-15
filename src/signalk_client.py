@@ -81,6 +81,7 @@ class SignalKClient:
         self._reconnect_count: int = 0
         self._last_delta_at: Optional[datetime] = None
         self._error_count: int = 0
+        self._ws: Optional[Any] = None  # active websocket for bidirectional use
 
     # ------------------------------------------------------------------ #
     # Public                                                                #
@@ -101,6 +102,22 @@ class SignalKClient:
     @property
     def self_context(self) -> str:
         return self._self_context
+
+    async def send(self, message: str) -> bool:
+        """Send a message through the active WebSocket.
+
+        Returns True if sent successfully, False if no connection or error.
+        Used by the publisher to send delta messages back to Signal K.
+        """
+        ws = self._ws
+        if ws is None or not self._connected:
+            return False
+        try:
+            await ws.send(message)
+            return True
+        except Exception as exc:
+            logger.debug("send() failed: %s", exc)
+            return False
 
     async def check_availability(self) -> bool:
         """
@@ -144,6 +161,7 @@ class SignalKClient:
                 logger.warning("SignalKClient error: %s", exc)
 
             self._connected = False
+            self._ws = None
             delay = delays[min(delay_index, len(delays) - 1)]
             logger.info(
                 "Reconnecting in %.0fs (attempt %d)…",
@@ -167,7 +185,7 @@ class SignalKClient:
             ping_timeout=20,
             open_timeout=15,
         ) as ws:
-            # ---- hello ------------------------------------------------ #
+            self._ws = ws
             try:
                 hello_raw = await asyncio.wait_for(ws.recv(), timeout=10.0)
                 hello = json.loads(hello_raw)
