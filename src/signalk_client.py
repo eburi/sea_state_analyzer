@@ -82,6 +82,7 @@ class SignalKClient:
         self._last_delta_at: Optional[datetime] = None
         self._error_count: int = 0
         self._ws: Optional[Any] = None  # active websocket for bidirectional use
+        self._auth_token: Optional[str] = None  # JWT for authenticated writes
 
     # ------------------------------------------------------------------ #
     # Public                                                                #
@@ -102,6 +103,18 @@ class SignalKClient:
     @property
     def self_context(self) -> str:
         return self._self_context
+
+    def set_auth_token(self, token: Optional[str]) -> None:
+        """Set the JWT auth token for authenticated WebSocket connections.
+
+        When set, the token is sent as an ``Authorization: Bearer`` header
+        on WebSocket connect, enabling delta writes.
+        """
+        self._auth_token = token
+        if token:
+            logger.info("Auth token set on client (len=%d)", len(token))
+        else:
+            logger.info("Auth token cleared")
 
     async def send(self, message: str) -> bool:
         """Send a message through the active WebSocket.
@@ -179,11 +192,18 @@ class SignalKClient:
     async def _connect_and_stream(self, queue: asyncio.Queue) -> None:
         logger.info("Connecting to %s", self._config.ws_url)
 
+        # Include auth token as extra header if available
+        extra_headers: Dict[str, str] = {}
+        if self._auth_token:
+            extra_headers["Authorization"] = f"Bearer {self._auth_token}"
+            logger.info("WebSocket connecting with auth token")
+
         async with websockets.connect(
             self._config.ws_url,
             ping_interval=20,
             ping_timeout=20,
             open_timeout=15,
+            additional_headers=extra_headers if extra_headers else None,
         ) as ws:
             self._ws = ws
             try:

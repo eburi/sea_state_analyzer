@@ -1,8 +1,12 @@
 """Signal K delta publisher for wave estimates.
 
-Formats MotionEstimate data as Signal K delta messages and sends them
-back to the server via WebSocket.  Uses the same connection as the
-SignalKClient reader (bidirectional WebSocket).
+Formats MotionEstimate data as Signal K delta messages and publishes
+them to the Signal K server via authenticated WebSocket.
+
+The app obtains a JWT token through the Signal K device access request
+flow (see ``signalk_auth.py``).  The token is included as an
+``Authorization: Bearer`` header on the WebSocket connection, enabling
+write access to the Signal K data model.
 
 Delta format::
 
@@ -17,9 +21,6 @@ Delta format::
         ]
       }]
     }
-
-No formal device registration is needed on unsecured Signal K servers;
-the ``source`` object serves as implicit registration.
 """
 from __future__ import annotations
 
@@ -28,7 +29,6 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from config import Config, DEFAULT_CONFIG
 from models import MotionEstimate
 from paths import (
     HEAVE,
@@ -141,6 +141,8 @@ async def publish_delta(
     source_label: str = "boat_wave_state",
 ) -> bool:
     """Send a delta message for the given MotionEstimate via WebSocket.
+
+    Requires an authenticated WebSocket connection (see ``signalk_auth.py``).
 
     Args:
         ws: An open websockets connection (websockets.WebSocketClientProtocol).

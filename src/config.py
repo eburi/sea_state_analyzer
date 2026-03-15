@@ -132,6 +132,18 @@ class Config:
     publish_source_label: str = "boat_wave_state"
 
     # ------------------------------------------------------------------ #
+    # Signal K authentication                                              #
+    # ------------------------------------------------------------------ #
+    # Path to persist the device clientId and JWT token across restarts.
+    auth_token_file: str = "/data/signalk_token.json"
+    # Description shown in Signal K admin UI when requesting device access.
+    auth_device_description: str = "Boat Wave State monitor"
+    # How long to poll for user approval before giving up (seconds).
+    auth_approval_timeout_s: float = 300.0
+    # Interval between polling requests while waiting for approval.
+    auth_poll_interval_s: float = 5.0
+
+    # ------------------------------------------------------------------ #
     # Heave / wave height estimation                                       #
     # ------------------------------------------------------------------ #
     # Kalman filter tuning (Sharkh et al. 2014)
@@ -271,6 +283,10 @@ class Config:
         ps = _env_bool("PUBLISH_TO_SIGNALK")
         if ps is not None:
             kwargs["publish_to_signalk"] = ps
+
+        atf = _env("AUTH_TOKEN_FILE")
+        if atf:
+            kwargs["auth_token_file"] = atf
 
         ep = _env_bool("ENABLE_PLOTS")
         if ep is not None:

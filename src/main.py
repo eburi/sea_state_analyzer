@@ -50,6 +50,13 @@ try:
 except ImportError:
     _PUBLISHER_AVAILABLE = False
 
+# Try importing auth module
+try:
+    from signalk_auth import ensure_auth_token
+    _AUTH_AVAILABLE = True
+except ImportError:
+    _AUTH_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # Try importing IMU reader — absent on Mac / without smbus2
@@ -113,6 +120,45 @@ async def _live_mode(config: Config) -> None:
 
     # Check server availability (non-blocking; failure does not abort)
     await client.check_availability()
+
+    # --- Auth setup (concurrent — does not block other tasks) ------------- #
+    # The auth_ready event is set once a valid token is obtained (or auth
+    # is skipped).  The _publish_loop waits on this event before sending.
+    # auth_failed is set if auth could not be obtained, so _publish_loop
+    # can exit gracefully instead of waiting forever.
+    auth_ready = asyncio.Event()
+    auth_failed = asyncio.Event()
+
+    if not (config.publish_to_signalk and _PUBLISHER_AVAILABLE and _AUTH_AVAILABLE):
+        # Publishing not configured or deps missing — nothing to wait for
+        if config.publish_to_signalk and not _AUTH_AVAILABLE:
+            logger.warning("publish_to_signalk=True but signalk_auth module not available")
+        auth_ready.set()  # unblock publish_loop (it will still check _PUBLISHER_AVAILABLE)
+
+    async def _auth_task() -> None:
+        """Obtain Signal K auth token concurrently with other startup tasks.
+
+        Sets auth_ready on success, auth_failed on failure.  The
+        _publish_loop waits on auth_ready before attempting sends.
+        """
+        if not (config.publish_to_signalk and _PUBLISHER_AVAILABLE and _AUTH_AVAILABLE):
+            return
+        logger.info("Authenticating for Signal K write access (runs in background)…")
+        try:
+            auth = await ensure_auth_token(config)
+            if auth and auth.token:
+                client.set_auth_token(auth.token)
+                logger.info("Authenticated — wave deltas will be published via WebSocket")
+                auth_ready.set()
+            else:
+                logger.warning(
+                    "Could not obtain auth token — publishing disabled. "
+                    "Approve the device request in Signal K admin UI and restart."
+                )
+                auth_failed.set()
+        except Exception as exc:
+            logger.error("Auth task failed: %s — publishing disabled", exc)
+            auth_failed.set()
 
     # --- IMU setup (best-effort) ----------------------------------------- #
     imu_reader: Optional["IMUReader"] = None  # type: ignore[name-defined]
@@ -292,15 +338,69 @@ async def _live_mode(config: Config) -> None:
             await asyncio.sleep(30.0)
             recorder.flush_all()
 
-    async def _publish_loop() -> None:
-        """Publish latest MotionEstimate to Signal K at configured interval.
+    async def _validate_publish(cfg: Config, sk_client: SignalKClient) -> bool:
+        """Check that published wave data appears in Signal K's data model.
 
-        Sends delta messages through the SignalKClient's active WebSocket.
-        Skips silently when no estimate is available, the client is
-        disconnected, or publishing is disabled.
+        Queries the REST API for the motionSeverity path.  If the path
+        exists with a recent value, publishing is confirmed working.
         """
+        try:
+            import httpx as _httpx
+            url = f"{cfg.base_url}/signalk/v1/api/vessels/self/environment/water/waves"
+            headers: Dict[str, str] = {}
+            if sk_client._auth_token:
+                headers["Authorization"] = f"Bearer {sk_client._auth_token}"
+            async with _httpx.AsyncClient(timeout=5.0) as hc:
+                resp = await hc.get(url, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data and isinstance(data, dict):
+                        logger.info(
+                            "Publish validation OK — wave data visible in Signal K "
+                            "(paths: %s)",
+                            ", ".join(sorted(data.keys())[:5]),
+                        )
+                        return True
+                logger.warning(
+                    "Publish validation: wave data not yet visible (HTTP %d). "
+                    "This may indicate the server is ignoring writes.",
+                    resp.status_code,
+                )
+                return False
+        except Exception as exc:
+            logger.warning("Publish validation error: %s", exc)
+            return False
+
+    async def _publish_loop() -> None:
+        """Publish latest MotionEstimate to Signal K via authenticated WebSocket.
+
+        Waits for the auth_ready event before starting, so authentication
+        can complete concurrently with ingestion / sampling / display.
+
+        Sends delta messages through the SignalKClient's WebSocket connection.
+        Requires a valid auth token to be set on the client (see signalk_auth).
+        Skips silently when no estimate is available or not connected.
+
+        After the first successful send, validates that the data appears in
+        the Signal K data model via REST API (echo-back check).
+        """
+        # Wait for auth to complete (or fail) before publishing
+        logger.info("Publish loop waiting for authentication…")
+        done, _ = await asyncio.wait(
+            [
+                asyncio.create_task(auth_ready.wait()),
+                asyncio.create_task(auth_failed.wait()),
+            ],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if auth_failed.is_set() and not auth_ready.is_set():
+            logger.warning("Publish loop exiting — authentication failed")
+            return
+        logger.info("Publish loop: auth ready, starting delta publishing")
+
         publish_count = 0
         fail_count = 0
+        validated = False
         while True:
             await asyncio.sleep(config.publish_interval_s)
             me = last_me
@@ -313,20 +413,23 @@ async def _live_mode(config: Config) -> None:
             )
             if msg is None:
                 continue
+
             ok = await client.send(msg)
             if ok:
                 publish_count += 1
                 if publish_count <= 3 or publish_count % 100 == 0:
                     logger.info(
-                        "Published wave delta #%d (%d bytes)",
+                        "Published wave delta #%d via WS (%d bytes)",
                         publish_count, len(msg),
                     )
+
+                # Echo-back validation on the 2nd successful publish
+                if publish_count == 2 and not validated:
+                    validated = await _validate_publish(config, client)
             else:
                 fail_count += 1
                 if fail_count <= 3 or fail_count % 100 == 0:
-                    logger.debug(
-                        "Publish skipped #%d (not connected)", fail_count,
-                    )
+                    logger.warning("Publish failed #%d", fail_count)
 
     # Run all tasks concurrently
     tasks = [
@@ -339,9 +442,15 @@ async def _live_mode(config: Config) -> None:
     ]
     if imu_reader is not None:
         tasks.append(asyncio.create_task(_imu_loop(), name="imu"))
+    # Auth runs concurrently — does not block other tasks
+    if config.publish_to_signalk and _PUBLISHER_AVAILABLE and _AUTH_AVAILABLE:
+        tasks.append(asyncio.create_task(_auth_task(), name="auth"))
     if config.publish_to_signalk and _PUBLISHER_AVAILABLE:
         tasks.append(asyncio.create_task(_publish_loop(), name="publisher"))
-        logger.info("Signal K publishing enabled (every %.0fs)", config.publish_interval_s)
+        logger.info(
+            "Signal K publishing enabled (every %.0fs, authenticated WebSocket)",
+            config.publish_interval_s,
+        )
     elif config.publish_to_signalk and not _PUBLISHER_AVAILABLE:
         logger.warning("publish_to_signalk=True but signalk_publisher module not available")
     else:
