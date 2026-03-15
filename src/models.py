@@ -193,6 +193,7 @@ class WindowFeatures:
     heading_cog_var: Optional[float] = None
     wind_speed_var: Optional[float] = None
     wind_angle_var: Optional[float] = None
+    wind_angle_mean: Optional[float] = None   # rad, circular mean of true wind angle relative to bow
 
     # Spectral entropy (over roll+pitch combined)
     spectral_entropy_roll: Optional[float] = None
@@ -257,7 +258,10 @@ class MotionEstimate:
     wave_heading: Optional[str] = None             # head / following / beam / quartering
 
     # Encounter direction proxy
-    # beam_like / head_or_following_like / quartering_like / confused_like
+    # With wind angle: head_like / head_quartering_like / beam_like /
+    #   following_quartering_like / following_like / confused_like
+    # Without wind angle (fallback): head_or_following_like /
+    #   beam_like / quartering_like / confused_like / mixed
     encounter_direction: Optional[str] = None
     direction_confidence: Optional[float] = None
 

@@ -173,10 +173,9 @@ async def _live_mode(config: Config) -> None:
     # --- Auth setup (concurrent — does not block other tasks) ------------- #
     # The auth_ready event is set once a valid token is obtained (or auth
     # is skipped).  The _publish_loop waits on this event before sending.
-    # auth_failed is set if auth could not be obtained, so _publish_loop
-    # can exit gracefully instead of waiting forever.
+    # The _auth_task retries with backoff until approved, so auth_ready
+    # will eventually be set.
     auth_ready = asyncio.Event()
-    auth_failed = asyncio.Event()
 
     if not (config.publish_to_signalk and _PUBLISHER_AVAILABLE and _AUTH_AVAILABLE):
         # Publishing not configured or deps missing — nothing to wait for
@@ -187,8 +186,9 @@ async def _live_mode(config: Config) -> None:
     async def _auth_task() -> None:
         """Obtain Signal K auth token concurrently with other startup tasks.
 
-        Sets auth_ready on success, auth_failed on failure.  The
-        _publish_loop waits on auth_ready before attempting sends.
+        Sets auth_ready on success.  On failure, retries with exponential
+        backoff (30s → 60s → 120s → 300s max) so that a late approval in
+        the Signal K admin UI is picked up without restarting the app.
 
         After obtaining the token, forces a WebSocket reconnect so the
         new connection includes the Authorization header.
@@ -196,22 +196,35 @@ async def _live_mode(config: Config) -> None:
         if not (config.publish_to_signalk and _PUBLISHER_AVAILABLE and _AUTH_AVAILABLE):
             return
         logger.info("Authenticating for Signal K write access (runs in background)…")
-        try:
-            auth = await ensure_auth_token(config)
-            if auth and auth.token:
-                client.set_auth_token(auth.token)
-                logger.info("Authenticated — forcing reconnect for authenticated WebSocket")
-                await client.reconnect()
-                auth_ready.set()
-            else:
-                logger.warning(
-                    "Could not obtain auth token — publishing disabled. "
-                    "Approve the device request in Signal K admin UI and restart."
+        backoff_delays = [30, 60, 120, 300]  # seconds between retries
+        attempt = 0
+        while True:
+            try:
+                auth = await ensure_auth_token(config)
+                if auth and auth.token:
+                    client.set_auth_token(auth.token)
+                    logger.info("Authenticated — forcing reconnect for authenticated WebSocket")
+                    await client.reconnect()
+                    auth_ready.set()
+                    return
+                else:
+                    delay = backoff_delays[min(attempt, len(backoff_delays) - 1)]
+                    logger.warning(
+                        "Could not obtain auth token (attempt %d) — "
+                        "retrying in %ds. Approve the device request in "
+                        "Signal K admin UI.",
+                        attempt + 1, delay,
+                    )
+                    attempt += 1
+                    await asyncio.sleep(delay)
+            except Exception as exc:
+                delay = backoff_delays[min(attempt, len(backoff_delays) - 1)]
+                logger.error(
+                    "Auth task failed (attempt %d): %s — retrying in %ds",
+                    attempt + 1, exc, delay,
                 )
-                auth_failed.set()
-        except Exception as exc:
-            logger.error("Auth task failed: %s — publishing disabled", exc)
-            auth_failed.set()
+                attempt += 1
+                await asyncio.sleep(delay)
 
     # --- IMU setup (best-effort) ----------------------------------------- #
     imu_reader: Optional["IMUReader"] = None  # type: ignore[name-defined]
@@ -441,18 +454,10 @@ async def _live_mode(config: Config) -> None:
         After the first successful send, validates that the data appears in
         the Signal K data model via REST API (echo-back check).
         """
-        # Wait for auth to complete (or fail) before publishing
+        # Wait for auth to complete before publishing.  The _auth_task
+        # retries with backoff, so this will eventually unblock.
         logger.info("Publish loop waiting for authentication…")
-        done, _ = await asyncio.wait(
-            [
-                asyncio.create_task(auth_ready.wait()),
-                asyncio.create_task(auth_failed.wait()),
-            ],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if auth_failed.is_set() and not auth_ready.is_set():
-            logger.warning("Publish loop exiting — authentication failed")
-            return
+        await auth_ready.wait()
         logger.info("Publish loop: auth ready, starting delta publishing")
 
         # Send metadata delta once so Signal K has units/descriptions.

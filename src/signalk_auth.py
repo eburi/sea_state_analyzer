@@ -7,8 +7,10 @@ file so it survives container restarts.
 Flow:
     1. Load saved ``clientId`` + ``token`` from ``auth_token_file``.
     2. If a token exists, validate it with a test REST call.
-    3. If no valid token, POST a device access request to the server.
-    4. Poll the request status until the user approves (or denies/timeout).
+    3. If no valid token, save the ``clientId`` immediately (so it
+       survives restarts), then POST a device access request.
+    4. Poll the request status indefinitely until the user approves
+       (or denies).
     5. On approval, save the token and return it.
 
 The token is used as an ``Authorization: Bearer`` header on the WebSocket
@@ -122,7 +124,7 @@ async def request_device_access(
     config: Config,
     auth: AuthToken,
 ) -> Optional[str]:
-    """Request device access and poll until approved, denied, or timeout.
+    """Request device access and poll indefinitely until approved or denied.
 
     Posts an access request to the Signal K server, then polls the
     returned href until the state changes from PENDING to COMPLETED.
@@ -135,7 +137,7 @@ async def request_device_access(
         auth: Auth state (must have a valid client_id).
 
     Returns:
-        The JWT token string on approval, or None on denial/timeout/error.
+        The JWT token string on approval, or None on denial/error.
     """
     url = f"{config.base_url}/signalk/v1/access/requests"
     body = {
@@ -188,25 +190,27 @@ async def _poll_access_request(
     config: Config,
     poll_url: str,
 ) -> Optional[str]:
-    """Poll an access request URL until COMPLETED or timeout.
+    """Poll an access request URL indefinitely until COMPLETED.
+
+    Polls every ``auth_poll_interval_s`` seconds with no timeout.
+    The user can approve the request at any time in the Signal K admin UI.
+    Logs a reminder every 60 seconds while waiting.
 
     Args:
-        config: App configuration (for timeout and interval settings).
+        config: App configuration (for poll interval).
         poll_url: Full URL to poll (base_url + href from initial response).
 
     Returns:
-        JWT token on approval, None on denial/timeout/error.
+        JWT token on approval, None on denial/error.
     """
     import asyncio
 
     elapsed = 0.0
-    timeout = config.auth_approval_timeout_s
     interval = config.auth_poll_interval_s
 
-    logger.info("Polling for approval (timeout=%.0fs, interval=%.0fs)…",
-                timeout, interval)
+    logger.info("Polling for approval (interval=%.0fs, no timeout)…", interval)
 
-    while elapsed < timeout:
+    while True:
         await asyncio.sleep(interval)
         elapsed += interval
 
@@ -221,10 +225,10 @@ async def _poll_access_request(
                 state = data.get("state", "")
 
                 if state == "PENDING":
-                    if int(elapsed) % 30 == 0:  # Log every 30s
+                    if int(elapsed) % 60 == 0:  # Log every 60s
                         logger.info(
-                            "Still waiting for approval (%.0f/%.0fs)…",
-                            elapsed, timeout,
+                            "Still waiting for approval (%.0fs elapsed)…",
+                            elapsed,
                         )
                     continue
 
@@ -252,19 +256,15 @@ async def _poll_access_request(
         except Exception as exc:
             logger.warning("Poll error: %s — will retry", exc)
 
-    logger.error(
-        "Timed out waiting for device access approval (%.0fs). "
-        "Please approve the request in Signal K admin UI and restart.",
-        timeout,
-    )
-    return None
-
 
 async def ensure_auth_token(config: Config) -> Optional[AuthToken]:
     """High-level auth flow: load, validate, or request a new token.
 
     This is the main entry point for the auth module.  Call this on
     startup before connecting the WebSocket.
+
+    The clientId is saved to disk immediately after generation so it
+    survives restarts and the same request can be approved later.
 
     Returns:
         AuthToken with a valid token, or None if auth could not be obtained.
@@ -279,6 +279,12 @@ async def ensure_auth_token(config: Config) -> Optional[AuthToken]:
             logger.info("Saved token is invalid — requesting new device access")
             auth.token = None
             auth.permissions = None
+
+    # Persist clientId immediately so it survives restarts.
+    # On the next restart load_auth() will return this same clientId,
+    # and if the user approved the old request in the meantime the
+    # server will recognise the clientId.
+    save_auth(config, auth)
 
     # Request new device access
     token = await request_device_access(config, auth)

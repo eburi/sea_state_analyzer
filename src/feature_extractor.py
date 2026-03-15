@@ -648,6 +648,10 @@ class FeatureExtractor:
             wf.wind_speed_var = float(np.var(wst))
         if len(wat) >= 2:
             wf.wind_angle_var = float(np.var(wat))
+            # Circular mean of true wind angle relative to bow
+            wf.wind_angle_mean = float(
+                math.atan2(np.mean(np.sin(wat)), np.mean(np.cos(wat)))
+            )
 
         # ---- STW statistics (for Doppler correction quality) ---- #
         stw_arr = _arr("stw")
@@ -1185,7 +1189,25 @@ def _estimate_encounter_direction(
     wf: WindowFeatures,
 ) -> Tuple[str, float, bool]:
     """
-    Infer encounter direction proxy.
+    Infer encounter direction proxy from wind angle and spectral energy.
+
+    Uses wind angle as the primary directional signal (when available),
+    with roll/pitch spectral energy ratio and yaw variance as secondary
+    confirmation.
+
+    Labels returned:
+        head_like            – waves from ahead (wind angle |α| < 30°)
+        head_quartering_like – waves from forward quarter (30° ≤ |α| < 60°)
+        beam_like            – waves abeam (60° ≤ |α| < 120°)
+        following_quartering_like – waves from aft quarter (120° ≤ |α| < 150°)
+        following_like       – waves from astern (|α| ≥ 150°)
+        confused_like        – high confusion index, no clear direction
+        unknown              – insufficient data
+
+    When wind angle is not available, falls back to spectral energy ratio
+    with the legacy head_or_following_like / beam_like / quartering_like
+    labels.
+
     Returns (label, confidence, roll_dominant).
     """
     re = wf.roll_spectral_energy or 0.0
@@ -1202,30 +1224,95 @@ def _estimate_encounter_direction(
     # Base confidence on energy level
     base_conf = min(1.0, math.sqrt(total) / 0.05)
 
-    # Check wind angle proxy: aft-quarter = |wind_angle_bow| > π/2
-    aft_quarter_wind = False
-    # (wind angle info is not in WindowFeatures directly)
+    wind_angle = wf.wind_angle_mean  # rad, relative to bow, signed
 
+    if wind_angle is not None:
+        # --- Primary path: wind-angle-based classification --- #
+        # |α| gives angle off the bow regardless of port/starboard.
+        abs_angle = abs(wind_angle)  # 0 = head, π = following
+
+        # Determine if spectral data is consistent with the wind angle.
+        # Pitch-dominant (ratio < -0.2) is consistent with head or following.
+        # Roll-dominant (ratio > 0.2) is consistent with beam or quartering.
+        # The "dead zone" ratio in [-0.2, 0.2] is consistent with anything.
+        spectral_consistent = True
+        if abs_angle < math.radians(45):
+            # Wind says head-ish; pitch should dominate or be balanced
+            spectral_consistent = ratio < 0.3
+        elif abs_angle > math.radians(135):
+            # Wind says following-ish; pitch should dominate or be balanced
+            spectral_consistent = ratio < 0.3
+        elif math.radians(70) < abs_angle < math.radians(110):
+            # Wind says beam-ish; roll should dominate or be balanced
+            spectral_consistent = ratio > -0.3
+
+        # Confidence boost when spectral data agrees with wind angle
+        conf_mult = 0.9 if spectral_consistent else 0.65
+
+        # High wind angle variance degrades confidence (shifting wind)
+        if wf.wind_angle_var is not None and wf.wind_angle_var > 0.3:
+            conf_mult *= 0.7
+
+        # Classify by wind angle sector
+        #   0°–30°   = head (wind from ahead)
+        #  30°–60°   = head quartering
+        #  60°–120°  = beam
+        # 120°–165°  = following quartering (includes the dangerous
+        #              aft-quarter zone sailors care about most)
+        # 165°–180°  = dead following (wind from astern)
+        if abs_angle < math.radians(30):
+            label = "head_like"
+        elif abs_angle < math.radians(60):
+            label = "head_quartering_like"
+        elif abs_angle < math.radians(120):
+            label = "beam_like"
+        elif abs_angle < math.radians(165):
+            label = "following_quartering_like"
+        else:
+            label = "following_like"
+
+        # Confusion override: if spectral regularity is very low,
+        # upgrade to confused regardless of wind angle.
+        confusion, _ = _estimate_regularity(wf)
+        if confusion > 0.7 and not spectral_consistent:
+            label = "confused_like"
+            conf_mult = 0.4
+
+        confidence = base_conf * conf_mult
+        return label, float(np.clip(confidence, 0.0, 1.0)), roll_dom
+
+    # --- Fallback: spectral-only classification (no wind angle) --- #
+    # Improved over old version: use yaw variance to disambiguate
+    # quartering in the mixed zone too.
     if ratio > 0.4:
         # Strong roll
         if yaw_var > 0.001:
             label = "quartering_like"
-            confidence = base_conf * 0.8
+            confidence = base_conf * 0.7
         else:
             label = "beam_like"
-            confidence = base_conf * 0.9
+            confidence = base_conf * 0.8
     elif ratio < -0.4:
-        # Strong pitch
-        label = "head_or_following_like"
-        confidence = base_conf * 0.85
+        # Strong pitch — cannot distinguish head from following without
+        # wind angle, but yaw variance hints at quartering tendency.
+        if yaw_var > 0.002:
+            label = "quartering_like"
+            confidence = base_conf * 0.55
+        else:
+            label = "head_or_following_like"
+            confidence = base_conf * 0.6
     else:
-        # Mixed: check confusion indicators
+        # Balanced energy
         confusion, _ = _estimate_regularity(wf)
-        if confusion > 0.5:
+        if yaw_var > 0.001:
+            label = "quartering_like"
+            confidence = base_conf * 0.5
+        elif confusion > 0.5:
             label = "confused_like"
+            confidence = base_conf * 0.4
         else:
             label = "mixed"
-        confidence = base_conf * 0.5
+            confidence = base_conf * 0.4
 
     return label, float(np.clip(confidence, 0.0, 1.0)), roll_dom
 

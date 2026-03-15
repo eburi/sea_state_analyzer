@@ -18,8 +18,10 @@ from feature_extractor import (
     _spectral_entropy,
     _spectral_energy_bands,
     _regime_label,
+    _estimate_encounter_direction,
+    _estimate_regularity,
 )
-from models import InstantSample
+from models import InstantSample, WindowFeatures
 from datetime import datetime, timezone, timedelta
 
 
@@ -220,3 +222,192 @@ def test_spectral_energy_bands_sum_to_one():
     result = _spectral_energy_bands(freqs, psd, bands)
     total = sum(result.values())
     assert total == pytest.approx(1.0, abs=0.05)
+
+
+# --------------------------------------------------------------------------- #
+# Encounter direction classification                                           #
+# --------------------------------------------------------------------------- #
+
+
+def _make_wf(
+    roll_energy: float = 0.01,
+    pitch_energy: float = 0.01,
+    yaw_rate_var: float = 0.0,
+    wind_angle_mean: float = None,
+    wind_angle_var: float = None,
+    spectral_entropy_roll: float = None,
+    spectral_entropy_pitch: float = None,
+    roll_period_stability: float = None,
+    pitch_period_stability: float = None,
+) -> WindowFeatures:
+    """Helper to build a minimal WindowFeatures for direction tests."""
+    return WindowFeatures(
+        timestamp=_ts(),
+        window_s=60.0,
+        n_samples=120,
+        roll_spectral_energy=roll_energy,
+        pitch_spectral_energy=pitch_energy,
+        yaw_rate_var=yaw_rate_var,
+        wind_angle_mean=wind_angle_mean,
+        wind_angle_var=wind_angle_var,
+        spectral_entropy_roll=spectral_entropy_roll,
+        spectral_entropy_pitch=spectral_entropy_pitch,
+        roll_period_stability=roll_period_stability,
+        pitch_period_stability=pitch_period_stability,
+    )
+
+
+# -- Wind-angle-based classification tests --
+
+def test_direction_head_seas():
+    """Wind from ahead (angle ~0) -> head_like."""
+    wf = _make_wf(
+        roll_energy=0.005, pitch_energy=0.02,
+        wind_angle_mean=math.radians(10),
+    )
+    label, conf, roll_dom = _estimate_encounter_direction(wf)
+    assert label == "head_like"
+    assert conf > 0.0
+    assert not roll_dom  # pitch dominant
+
+
+def test_direction_following_seas():
+    """Wind from astern (angle ~180°) -> following_like."""
+    wf = _make_wf(
+        roll_energy=0.005, pitch_energy=0.02,
+        wind_angle_mean=math.radians(170),
+    )
+    label, conf, _ = _estimate_encounter_direction(wf)
+    assert label == "following_like"
+
+
+def test_direction_following_seas_negative_angle():
+    """Wind from astern on port side (angle ~ -170°) -> following_like."""
+    wf = _make_wf(
+        roll_energy=0.005, pitch_energy=0.02,
+        wind_angle_mean=math.radians(-170),
+    )
+    label, conf, _ = _estimate_encounter_direction(wf)
+    assert label == "following_like"
+
+
+def test_direction_aft_quarter_port():
+    """Waves from 30° off the port stern -> following_quartering_like.
+
+    This is the specific scenario the user observed: true wind angle
+    relative to bow is ~150° (wind from aft, slightly to port).
+    """
+    wf = _make_wf(
+        roll_energy=0.005, pitch_energy=0.015,
+        wind_angle_mean=math.radians(150),
+    )
+    label, conf, _ = _estimate_encounter_direction(wf)
+    assert label == "following_quartering_like"
+
+
+def test_direction_aft_quarter_starboard():
+    """Waves from 30° off the starboard stern -> following_quartering_like."""
+    wf = _make_wf(
+        roll_energy=0.005, pitch_energy=0.015,
+        wind_angle_mean=math.radians(-150),
+    )
+    label, conf, _ = _estimate_encounter_direction(wf)
+    assert label == "following_quartering_like"
+
+
+def test_direction_beam_seas():
+    """Wind abeam (angle ~90°) -> beam_like."""
+    wf = _make_wf(
+        roll_energy=0.02, pitch_energy=0.005,
+        wind_angle_mean=math.radians(90),
+    )
+    label, conf, roll_dom = _estimate_encounter_direction(wf)
+    assert label == "beam_like"
+    assert roll_dom  # roll dominant
+
+
+def test_direction_head_quarter():
+    """Wind from 45° off the bow -> head_quartering_like."""
+    wf = _make_wf(
+        roll_energy=0.01, pitch_energy=0.015,
+        wind_angle_mean=math.radians(45),
+    )
+    label, conf, _ = _estimate_encounter_direction(wf)
+    assert label == "head_quartering_like"
+
+
+def test_direction_spectral_consistency_boosts_confidence():
+    """When spectral data agrees with wind angle, confidence is higher."""
+    # Head seas with pitch-dominant energy (consistent)
+    wf_consistent = _make_wf(
+        roll_energy=0.005, pitch_energy=0.02,
+        wind_angle_mean=math.radians(10),
+    )
+    _, conf_good, _ = _estimate_encounter_direction(wf_consistent)
+
+    # Head seas with roll-dominant energy (inconsistent)
+    wf_inconsistent = _make_wf(
+        roll_energy=0.02, pitch_energy=0.005,
+        wind_angle_mean=math.radians(10),
+    )
+    _, conf_bad, _ = _estimate_encounter_direction(wf_inconsistent)
+
+    assert conf_good > conf_bad
+
+
+def test_direction_high_wind_angle_var_reduces_confidence():
+    """High wind angle variance should lower confidence."""
+    wf_stable = _make_wf(
+        roll_energy=0.01, pitch_energy=0.01,
+        wind_angle_mean=math.radians(90),
+        wind_angle_var=0.05,
+    )
+    _, conf_stable, _ = _estimate_encounter_direction(wf_stable)
+
+    wf_variable = _make_wf(
+        roll_energy=0.01, pitch_energy=0.01,
+        wind_angle_mean=math.radians(90),
+        wind_angle_var=1.0,
+    )
+    _, conf_variable, _ = _estimate_encounter_direction(wf_variable)
+
+    assert conf_stable > conf_variable
+
+
+# -- Spectral-only fallback tests (no wind angle) --
+
+def test_direction_fallback_beam():
+    """Strong roll energy, no wind -> beam_like."""
+    wf = _make_wf(roll_energy=0.05, pitch_energy=0.005)
+    label, conf, roll_dom = _estimate_encounter_direction(wf)
+    assert label == "beam_like"
+    assert roll_dom
+
+
+def test_direction_fallback_head_or_following():
+    """Strong pitch energy, low yaw, no wind -> head_or_following_like."""
+    wf = _make_wf(roll_energy=0.005, pitch_energy=0.05, yaw_rate_var=0.0001)
+    label, conf, _ = _estimate_encounter_direction(wf)
+    assert label == "head_or_following_like"
+
+
+def test_direction_fallback_quartering_from_pitch_dominant():
+    """Strong pitch energy + high yaw variance -> quartering_like (fallback)."""
+    wf = _make_wf(roll_energy=0.005, pitch_energy=0.05, yaw_rate_var=0.005)
+    label, conf, _ = _estimate_encounter_direction(wf)
+    assert label == "quartering_like"
+
+
+def test_direction_fallback_quartering_from_roll_dominant():
+    """Strong roll energy + high yaw variance -> quartering_like (fallback)."""
+    wf = _make_wf(roll_energy=0.05, pitch_energy=0.005, yaw_rate_var=0.005)
+    label, conf, _ = _estimate_encounter_direction(wf)
+    assert label == "quartering_like"
+
+
+def test_direction_zero_energy():
+    """No spectral energy -> unknown."""
+    wf = _make_wf(roll_energy=0.0, pitch_energy=0.0)
+    label, conf, roll_dom = _estimate_encounter_direction(wf)
+    assert label == "unknown"
+    assert conf == 0.0

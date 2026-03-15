@@ -55,10 +55,18 @@ PERIOD_BANDS: List[Tuple[str, float, float]] = [
 
 # Encounter direction categories (from feature extractor)
 DIRECTION_CATEGORIES = [
+    # Wind-angle-based labels (primary when wind data available)
+    "head_like",
+    "head_quartering_like",
     "beam_like",
+    "following_quartering_like",
+    "following_like",
+    # Spectral-only fallback labels (when no wind angle)
     "head_or_following_like",
     "quartering_like",
+    # Confusion / catch-all
     "confused_like",
+    "mixed",
 ]
 
 

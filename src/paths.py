@@ -303,8 +303,12 @@ WAVE_PATH_META: Dict[str, Dict[str, object]] = {
         "displayName": "Encounter Direction",
         "shortName": "Dir",
         "enum": [
-            "head_or_following_like",
+            "head_like",
+            "head_quartering_like",
             "beam_like",
+            "following_quartering_like",
+            "following_like",
+            "head_or_following_like",
             "quartering_like",
             "confused_like",
             "mixed",
