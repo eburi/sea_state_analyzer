@@ -904,16 +904,22 @@ class FeatureExtractor:
                         wave_est.significant_height = hs_k
                         wave_est.method_used = "kalman"
                     # Otherwise keep trochoidal (already set)
-                elif kalman_est.converged and wave_est.significant_height is None:
-                    # Only Kalman available
+                elif wave_est.significant_height is None:
+                    # Only Kalman available — use it even before full
+                    # convergence (useful immediately, bias stabilises later).
+                    # Mark confidence lower when not yet converged.
                     wave_est.significant_height = kalman_est.significant_height
                     wave_est.method_used = "kalman"
+                    if not kalman_est.converged:
+                        wave_est.confidence = min(
+                            wave_est.confidence, 0.3
+                        ) if wave_est.confidence > 0 else 0.3
         self._latest_wave_estimate = wave_est
 
         # Log wave estimation result
         logger.debug(
             "wave_est: samples=%d, accel_rms=%.4f, freq=%.3f, "
-            "troch=%s, kalman=%s, Hs=%s, method=%s",
+            "troch=%s, kalman=%s, Hs=%s, method=%s, accel_max=%.4f",
             len(accel_data),
             wave_est.accel_rms or 0.0,
             wave_est.accel_dominant_freq or 0.0,
@@ -921,6 +927,7 @@ class FeatureExtractor:
             f"{wave_est.kalman.significant_height:.3f}" if wave_est.kalman else "None",
             f"{wave_est.significant_height:.3f}" if wave_est.significant_height is not None else "None",
             wave_est.method_used,
+            wave_est.accel_max or 0.0,
         )
 
         # Populate MotionEstimate fields

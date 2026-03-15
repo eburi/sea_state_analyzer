@@ -115,6 +115,7 @@ def trochoidal_wave_height(
     # Let's use the general formula properly.
 
     f_o = frequency_hz
+    doppler_applied = False
 
     if abs(delta_v) < 0.05:
         # No Doppler: L = g * T^2 / (2*pi) = g / (2*pi*f^2)
@@ -123,14 +124,25 @@ def trochoidal_wave_height(
         # General Doppler formula from bareboat-necessities:
         discriminant = 8.0 * math.pi * f_o * g * delta_v + g * g
         if discriminant < 0:
-            # Infeasible -- too strong following sea for this frequency
-            return None
-        sign_dv = 1.0 if delta_v >= 0 else -1.0
-        wavelength = (
-            sign_dv * math.sqrt(discriminant)
-            + 4.0 * math.pi * f_o * delta_v
-            + g
-        ) / (4.0 * math.pi * f_o * f_o)
+            # Infeasible Doppler -- strong following sea makes the
+            # quadratic have no real root.  Fall back to the no-Doppler
+            # wavelength estimate (uses encounter frequency directly).
+            # This overestimates wavelength in following seas but is far
+            # better than returning None.
+            logger.debug(
+                "trochoidal Doppler infeasible (discriminant=%.1f, "
+                "delta_v=%.2f, f=%.3f Hz); falling back to no-Doppler",
+                discriminant, delta_v, f_o,
+            )
+            wavelength = g / (2.0 * math.pi * f_o * f_o)
+        else:
+            sign_dv = 1.0 if delta_v >= 0 else -1.0
+            wavelength = (
+                sign_dv * math.sqrt(discriminant)
+                + 4.0 * math.pi * f_o * delta_v
+                + g
+            ) / (4.0 * math.pi * f_o * f_o)
+            doppler_applied = True
 
     if wavelength <= 0.5:
         # Non-physical: wavelength too short
@@ -142,16 +154,18 @@ def trochoidal_wave_height(
     # Step 3: Wavenumber
     k = 2.0 * math.pi / wavelength
 
-    # Step 4: Correct observed accel to source accel if delta_v != 0
-    # a_observed_max = H * k^2 * (c + delta_v)^2
-    # a_max (source) = H * k^2 * c^2 = g * exp(2*pi*b/L)
-    # Therefore: a_max = a_observed_max * c^2 / (c + delta_v)^2
+    # Step 4: Correct observed accel to source accel if delta_v != 0.
+    # Only apply when Doppler wavelength succeeded — the acceleration
+    # correction uses the same Doppler model, so if the model failed
+    # for wavelength we must skip it here too.
     c = wave_speed
-    effective_speed = c + delta_v
-    if abs(effective_speed) < 0.1:
-        return None  # Near-stationary encounter
-
-    a_max = accel_max_observed * (c * c) / (effective_speed * effective_speed)
+    if doppler_applied:
+        effective_speed = c + delta_v
+        if abs(effective_speed) < 0.1:
+            return None  # Near-stationary encounter
+        a_max = accel_max_observed * (c * c) / (effective_speed * effective_speed)
+    else:
+        a_max = accel_max_observed
 
     # Step 5: Compute b parameter
     # a_max = g * exp(2*pi*b/L)
@@ -187,6 +201,7 @@ def trochoidal_wave_height(
     # We report 2*amplitude as a simple estimate.
     significant_height = 2.0 * amplitude
 
+    method = "trochoidal" if (doppler_applied or abs(delta_v) < 0.05) else "trochoidal_no_doppler"
     return TrochoidalEstimate(
         significant_height=significant_height,
         wave_amplitude=amplitude,
@@ -195,6 +210,7 @@ def trochoidal_wave_height(
         b_parameter=b,
         accel_max=a_max,
         frequency_hz=frequency_hz,
+        method=method,
     )
 
 

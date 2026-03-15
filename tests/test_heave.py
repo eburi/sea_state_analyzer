@@ -125,11 +125,60 @@ class TestTrochoidalWaveHeight:
         assert result is not None
         assert result.significant_height > 0
 
-    def test_strong_following_returns_none(self) -> None:
-        """Very strong following seas with high freq should be infeasible."""
+    def test_strong_following_falls_back_to_no_doppler(self) -> None:
+        """Very strong following seas with high freq: Doppler discriminant
+        goes negative, so the function falls back to the no-Doppler
+        estimate rather than returning None."""
         result = trochoidal_wave_height(0.5, 0.5, delta_v=-20.0)
-        # Discriminant should go negative
-        assert result is None
+        # Discriminant is negative, but fallback should produce a result
+        assert result is not None
+        assert result.significant_height > 0
+        assert result.method == "trochoidal_no_doppler"
+
+    def test_following_sea_doppler_fallback_real_conditions(self) -> None:
+        """Real-world scenario: following seas delta_v=-2.9, freq=0.2 Hz.
+
+        Discriminant = 8*pi*0.2*9.81*(-2.9) + 9.81^2
+                     = -142.7 + 96.2 = -46.5  (negative → fallback)
+        """
+        result = trochoidal_wave_height(1.3, 0.2, delta_v=-2.9)
+        assert result is not None
+        assert result.significant_height > 0
+        assert result.method == "trochoidal_no_doppler"
+        # Wavelength from no-Doppler: g/(2*pi*f^2) = 9.81/(2*pi*0.04) ≈ 39m
+        assert 30 < result.wavelength < 50
+
+    def test_doppler_fallback_wavelength_matches_no_doppler(self) -> None:
+        """When Doppler falls back, wavelength should match the zero-dv case
+        (since both use the same encounter frequency)."""
+        # Use delta_v that causes negative discriminant
+        result_fallback = trochoidal_wave_height(0.5, 0.3, delta_v=-10.0)
+        result_no_dv = trochoidal_wave_height(0.5, 0.3, delta_v=0.0)
+        assert result_fallback is not None
+        assert result_no_dv is not None
+        # Wavelengths should be equal (both use L = g/(2*pi*f^2))
+        assert abs(result_fallback.wavelength - result_no_dv.wavelength) < 0.01
+
+    def test_successful_doppler_marked_trochoidal(self) -> None:
+        """When Doppler succeeds (head seas), method should be 'trochoidal'."""
+        result = trochoidal_wave_height(0.5, 0.1, delta_v=3.0)
+        assert result is not None
+        assert result.method == "trochoidal"
+
+    def test_no_delta_v_marked_trochoidal(self) -> None:
+        """With no Doppler correction, method should be 'trochoidal'."""
+        result = trochoidal_wave_height(0.5, 0.1, delta_v=0.0)
+        assert result is not None
+        assert result.method == "trochoidal"
+
+    def test_doppler_fallback_no_accel_correction(self) -> None:
+        """When Doppler falls back, accel correction is skipped.
+        This means accel_max in result should equal the input accel."""
+        # Force discriminant negative
+        result = trochoidal_wave_height(0.8, 0.25, delta_v=-8.0)
+        assert result is not None
+        # Without Doppler accel correction, a_max = accel_max_observed
+        assert result.accel_max == 0.8
 
     def test_wave_height_physically_bounded(self) -> None:
         """Wave amplitude should not exceed L/(2*pi) (breaking limit)."""

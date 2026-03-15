@@ -157,7 +157,7 @@ class Config:
     heave_kalman_pos_trans_var: float = 1e-4
     heave_kalman_vel_trans_var: float = 1e-2
     heave_kalman_pos_integral_obs_var: float = 1e+1
-    heave_kalman_bias_window: int = 500    # samples for accel bias estimate
+    heave_kalman_bias_window: int = 5000   # samples (~100s at 50Hz) for accel bias estimate
 
     # Low-pass filter: cutoff = dominant_freq * multiplier
     heave_lowpass_cutoff_mult: float = 8.0
