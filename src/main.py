@@ -403,17 +403,29 @@ async def _live_mode(config: Config) -> None:
             return
         logger.info("Publish loop: auth ready, starting delta publishing")
 
-        # Send metadata delta once so Signal K has units/descriptions
+        # Send metadata delta once so Signal K has units/descriptions.
+        # Wait for the WebSocket to reconnect (auth triggers a reconnect
+        # and there's a brief gap before the new connection is live).
+        meta_sent = False
+        meta_msg = build_meta_delta(self_context=client.self_context)
         try:
-            meta_msg = build_meta_delta(self_context=client.self_context)
-            meta_ok = await client.send(meta_msg)
-            if meta_ok:
-                logger.info(
-                    "Published wave path metadata (%d bytes, %d paths)",
-                    len(meta_msg), len(WAVE_PATH_META),
+            for _attempt in range(10):
+                if client.connected:
+                    meta_ok = await client.send(meta_msg)
+                    if meta_ok:
+                        logger.info(
+                            "Published wave path metadata (%d bytes, %d paths)",
+                            len(meta_msg), len(WAVE_PATH_META),
+                        )
+                        meta_sent = True
+                        break
+                logger.debug("Waiting for WebSocket reconnect before sending meta…")
+                await asyncio.sleep(0.5)
+            if not meta_sent:
+                logger.warning(
+                    "Could not send wave path metadata after reconnect — "
+                    "will retry on first publish cycle"
                 )
-            else:
-                logger.warning("Failed to send wave path metadata (not connected?)")
         except Exception as exc:
             logger.warning("Error sending wave path metadata: %s", exc)
 
@@ -436,6 +448,20 @@ async def _live_mode(config: Config) -> None:
             ok = await client.send(msg)
             if ok:
                 publish_count += 1
+
+                # Retry meta send if it failed during initial reconnect
+                if not meta_sent:
+                    try:
+                        meta_ok = await client.send(meta_msg)
+                        if meta_ok:
+                            logger.info(
+                                "Published wave path metadata on retry (%d bytes, %d paths)",
+                                len(meta_msg), len(WAVE_PATH_META),
+                            )
+                            meta_sent = True
+                    except Exception:
+                        pass  # will retry next cycle
+
                 if publish_count <= 3 or publish_count % 100 == 0:
                     logger.info(
                         "Published wave delta #%d via WS (%d bytes)",
