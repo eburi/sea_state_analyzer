@@ -166,6 +166,9 @@ async def _live_mode(config: Config) -> None:
 
         Runs only when imu_reader is not None.  Errors are logged but
         never crash the loop — a single bad read is skipped.
+
+        Also feeds vertical_accel to the feature extractor's Kalman
+        heave filter at the full IMU rate.
         """
         nonlocal latest_imu_sample
         assert imu_reader is not None
@@ -178,6 +181,9 @@ async def _live_mode(config: Config) -> None:
                 else:
                     latest_imu_sample = await imu_reader.read_accel_gyro_only()
                 consecutive_errors = 0
+                # Feed vertical accel to feature extractor for wave estimation
+                if latest_imu_sample is not None and latest_imu_sample.vertical_accel is not None:
+                    extractor.add_imu_accel(latest_imu_sample.vertical_accel)
             except Exception as exc:
                 consecutive_errors += 1
                 if consecutive_errors <= 3 or consecutive_errors % 100 == 0:

@@ -265,6 +265,17 @@ class MotionEstimate:
     # Comfort proxy (0=comfortable, 1=very uncomfortable)
     comfort_proxy: Optional[float] = None
 
+    # Wave height estimation (from IMU accelerometer)
+    significant_height: Optional[float] = None      # metres (Hs)
+    heave: Optional[float] = None                    # metres (current heave displacement)
+    wave_height_method: Optional[str] = None         # "trochoidal" / "kalman"
+    wave_height_confidence: Optional[float] = None   # 0–1
+
+    # Accelerometer-derived wave frequency (independent of attitude PSD)
+    accel_dominant_freq: Optional[float] = None      # Hz
+    accel_dominant_period: Optional[float] = None    # seconds
+    accel_freq_confidence: Optional[float] = None    # 0–1
+
     # Trend compared to a longer window: improving / worsening / stable
     severity_trend: Optional[str] = None
 

@@ -132,6 +132,22 @@ class Config:
     publish_source_label: str = "boat_wave_state"
 
     # ------------------------------------------------------------------ #
+    # Heave / wave height estimation                                       #
+    # ------------------------------------------------------------------ #
+    # Kalman filter tuning (Sharkh et al. 2014)
+    heave_kalman_pos_integral_trans_var: float = 1e-6
+    heave_kalman_pos_trans_var: float = 1e-4
+    heave_kalman_vel_trans_var: float = 1e-2
+    heave_kalman_pos_integral_obs_var: float = 1e-1
+    heave_kalman_bias_window: int = 500    # samples for accel bias estimate
+
+    # Low-pass filter: cutoff = dominant_freq * multiplier
+    heave_lowpass_cutoff_mult: float = 8.0
+
+    # Minimum samples of vertical_accel in a window to attempt wave estimation
+    heave_min_accel_samples: int = 32
+
+    # ------------------------------------------------------------------ #
     # Derivative computation                                               #
     # ------------------------------------------------------------------ #
     # Trailing moving-average window applied to raw finite-difference

@@ -93,8 +93,13 @@ def _motion_estimate_to_values(
     if me.comfort_proxy is not None:
         pairs.append((WAVE_COMFORT_PROXY, round(me.comfort_proxy, 3)))
 
-    # Note: WAVE_SIGNIFICANT_HEIGHT and HEAVE are not yet populated —
-    # they require accelerometer-based wave height estimation (future).
+    # Significant wave height (metres) — from IMU accelerometer
+    if me.significant_height is not None:
+        pairs.append((WAVE_SIGNIFICANT_HEIGHT, round(me.significant_height, 2)))
+
+    # Heave displacement (metres) — from Kalman filter
+    if me.heave is not None:
+        pairs.append((HEAVE, round(me.heave, 3)))
 
     return [{"path": path, "value": value} for path, value in pairs]
 

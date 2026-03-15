@@ -27,6 +27,17 @@ from scipy.stats import kurtosis as scipy_kurtosis
 from config import Config, DEFAULT_CONFIG
 from models import InstantSample, LayerAFeatures, MotionEstimate, WindowFeatures
 
+# Heave/wave height estimation (optional -- degrades gracefully if unavailable)
+try:
+    from heave_estimator import (
+        KalmanHeaveEstimator,
+        WaveEstimate,
+        estimate_waves_from_accel,
+    )
+    _HEAVE_AVAILABLE = True
+except ImportError:
+    _HEAVE_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -364,6 +375,27 @@ class FeatureExtractor:
         # Trend: severity history keyed by window
         self._severity_history: Deque[Tuple[datetime, float]] = deque(maxlen=int(30 * 60 * self._fs))
 
+        # Vertical acceleration buffer for wave estimation (separate from
+        # the main rolling buffers because accel arrives at IMU sample rate,
+        # not at the canonical 2 Hz sample rate).
+        # We store (timestamp, vertical_accel) tuples.
+        imu_fs = config.imu_sample_rate_hz
+        self._accel_buf: Deque[float] = deque(maxlen=int(300 * imu_fs))
+        self._accel_fs: float = imu_fs  # actual sample rate of accel data
+
+        # Kalman heave estimator (if heave module available)
+        self._kalman_heave: Optional[Any] = None
+        self._latest_wave_estimate: Optional[Any] = None
+        if _HEAVE_AVAILABLE:
+            self._kalman_heave = KalmanHeaveEstimator(
+                dt=1.0 / imu_fs,
+                pos_integral_trans_var=config.heave_kalman_pos_integral_trans_var,
+                pos_trans_var=config.heave_kalman_pos_trans_var,
+                vel_trans_var=config.heave_kalman_vel_trans_var,
+                pos_integral_obs_var=config.heave_kalman_pos_integral_obs_var,
+                accel_bias_window=config.heave_kalman_bias_window,
+            )
+
     # ------------------------------------------------------------------ #
     # Layer A                                                              #
     # ------------------------------------------------------------------ #
@@ -378,7 +410,23 @@ class FeatureExtractor:
 
         features = self._compute_layer_a(sample)
         self._prev_sample = sample
+
+        # If this sample has vertical_accel data, buffer it for wave estimation
+        if sample.vertical_accel is not None:
+            self._accel_buf.append(sample.vertical_accel)
+
         return features
+
+    def add_imu_accel(self, vertical_accel: float) -> None:
+        """Buffer a single vertical acceleration sample from the IMU.
+
+        Call this at IMU sample rate (e.g. 50 Hz), not at the canonical
+        2 Hz sample rate.  This feeds the heave Kalman filter in real-time
+        and accumulates data for periodic wave estimation.
+        """
+        self._accel_buf.append(vertical_accel)
+        if self._kalman_heave is not None:
+            self._kalman_heave.update(vertical_accel)
 
     def _compute_layer_a(self, sample: InstantSample) -> LayerAFeatures:
         now = sample.timestamp
@@ -670,6 +718,9 @@ class FeatureExtractor:
         # ---- overall confidence ---- #
         me.overall_confidence = _overall_confidence(wf, me)
 
+        # ---- wave height estimation from IMU accel data ---- #
+        self._apply_wave_estimation(me, wf)
+
         return me
 
     # ------------------------------------------------------------------ #
@@ -762,6 +813,61 @@ class FeatureExtractor:
                 return
 
         me.doppler_correction_valid = True
+
+    def _apply_wave_estimation(
+        self, me: MotionEstimate, wf: WindowFeatures
+    ) -> None:
+        """Estimate wave height from buffered vertical acceleration data.
+
+        Uses both trochoidal and Kalman methods via the heave_estimator
+        module.  Populates me.significant_height, me.heave,
+        me.wave_height_method, me.wave_height_confidence, and
+        me.accel_dominant_freq/period/confidence.
+
+        Requires IMU accel data in self._accel_buf.  Gracefully returns
+        if insufficient data or heave module unavailable.
+        """
+        if not _HEAVE_AVAILABLE:
+            return
+
+        accel_data = np.array(self._accel_buf, dtype=float)
+        min_samples = self._config.heave_min_accel_samples
+        if len(accel_data) < min_samples:
+            return
+
+        # Use the last N seconds of accel data matching the motion estimate window
+        window_samples = int(me.window_s * self._accel_fs)
+        if len(accel_data) > window_samples:
+            accel_data = accel_data[-window_samples:]
+
+        # Compute delta_v from Doppler if available
+        delta_v = me.doppler_delta_v or 0.0
+
+        # Run combined wave estimation
+        wave_est = estimate_waves_from_accel(
+            vertical_accel=accel_data,
+            fs=self._accel_fs,
+            delta_v=delta_v,
+            kalman_estimator=self._kalman_heave,
+            lowpass_cutoff_mult=self._config.heave_lowpass_cutoff_mult,
+            psd_min_samples=min_samples,
+        )
+        self._latest_wave_estimate = wave_est
+
+        # Populate MotionEstimate fields
+        if wave_est.significant_height is not None:
+            me.significant_height = round(wave_est.significant_height, 3)
+        if wave_est.heave is not None:
+            me.heave = round(wave_est.heave, 3)
+        me.wave_height_method = wave_est.method_used
+        if wave_est.confidence > 0:
+            me.wave_height_confidence = round(wave_est.confidence, 3)
+        if wave_est.accel_dominant_freq is not None:
+            me.accel_dominant_freq = round(wave_est.accel_dominant_freq, 4)
+        if wave_est.accel_dominant_period is not None:
+            me.accel_dominant_period = round(wave_est.accel_dominant_period, 2)
+        if wave_est.accel_freq_confidence is not None:
+            me.accel_freq_confidence = round(wave_est.accel_freq_confidence, 3)
 
     def _compute_severity(self, wf: WindowFeatures) -> float:
         cfg = self._config
