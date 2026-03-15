@@ -231,6 +231,10 @@ class MotionEstimate:
     timestamp: datetime
     window_s: float
 
+    # Vessel position at estimate time
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
     # Motion severity 0–1 (instantaneous heuristic score)
     motion_severity: Optional[float] = None
     motion_severity_smoothed: Optional[float] = None
@@ -275,6 +279,22 @@ class MotionEstimate:
     accel_dominant_freq: Optional[float] = None      # Hz
     accel_dominant_period: Optional[float] = None    # seconds
     accel_freq_confidence: Optional[float] = None    # 0–1
+
+    # Partitioned wave components from multi-peak spectral analysis
+    wind_wave_height: Optional[float] = None
+    wind_wave_period: Optional[float] = None
+    wind_wave_freq: Optional[float] = None
+    wind_wave_confidence: Optional[float] = None
+
+    swell_1_height: Optional[float] = None
+    swell_1_period: Optional[float] = None
+    swell_1_freq: Optional[float] = None
+    swell_1_confidence: Optional[float] = None
+
+    swell_2_height: Optional[float] = None
+    swell_2_period: Optional[float] = None
+    swell_2_freq: Optional[float] = None
+    swell_2_confidence: Optional[float] = None
 
     # Trend compared to a longer window: improving / worsening / stable
     severity_trend: Optional[str] = None

@@ -21,6 +21,7 @@ from heave_estimator import (
     KalmanHeaveEstimator,
     TrochoidalEstimate,
     WaveEstimate,
+    WavePartition,
     butterworth_lowpass,
     estimate_waves_from_accel,
     trochoidal_wave_height,
@@ -614,6 +615,51 @@ class TestFeatureExtractorWaveIntegration:
             # on the specific signal characteristics)
             assert me.accel_dominant_freq is not None or me.significant_height is not None
 
+    def test_motion_estimate_includes_position_and_partition_fields(self) -> None:
+        from config import Config
+        from feature_extractor import FeatureExtractor
+        from datetime import timedelta
+
+        cfg = Config(
+            sample_rate_hz=2.0,
+            rolling_windows_s=[10],
+            imu_sample_rate_hz=50.0,
+            heave_min_accel_samples=32,
+        )
+        fe = FeatureExtractor(cfg)
+
+        base_ts = datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        for i in range(120):
+            ts = base_ts + timedelta(milliseconds=i * 500)
+            sample = self._make_sample(
+                ts=ts,
+                roll=0.05 * math.sin(2 * math.pi * 0.12 * (i / 2.0)),
+                pitch=0.03 * math.sin(2 * math.pi * 0.10 * (i / 2.0)),
+            )
+            sample.latitude = -10.9
+            sample.longitude = -105.3
+            fe.add_sample(sample)
+
+        t = np.arange(0, 60.0, 1.0 / 50.0)
+        accel = (
+            0.6 * np.sin(2 * math.pi * 0.30 * t)
+            + 0.8 * np.sin(2 * math.pi * 0.15 * t)
+            + 0.7 * np.sin(2 * math.pi * 0.09 * t)
+        )
+        for a in accel:
+            fe.add_imu_accel(float(a))
+
+        me = fe.get_motion_estimate(window_s=10)
+        assert me is not None
+        assert me.latitude == pytest.approx(-10.9)
+        assert me.longitude == pytest.approx(-105.3)
+
+        # Partition fields may be absent if the signal does not present
+        # sufficiently distinct peaks at this window length; ensure fields exist.
+        assert hasattr(me, "wind_wave_height")
+        assert hasattr(me, "swell_1_height")
+        assert hasattr(me, "swell_2_height")
+
 
 # --------------------------------------------------------------------------- #
 # 6. Publisher integration                                                     #
@@ -978,3 +1024,58 @@ class TestSpectralHs:
             freqs, psd, freq_min_hz=30.0, freq_max_hz=40.0,
         )
         assert result is None
+
+
+# --------------------------------------------------------------------------- #
+# 9. Multi-peak spectral partitions                                           #
+# --------------------------------------------------------------------------- #
+
+class TestWavePartitions:
+
+    def test_partition_extraction_returns_components(self) -> None:
+        fs = 50.0
+        duration = 180.0
+        t = np.arange(0, duration, 1.0 / fs)
+
+        # Wind-wave + two swell systems
+        signal = (
+            0.6 * np.sin(2 * math.pi * 0.32 * t)   # wind-wave (~3.1s)
+            + 0.9 * np.sin(2 * math.pi * 0.16 * t) # swell_1 (~6.3s)
+            + 0.7 * np.sin(2 * math.pi * 0.09 * t) # swell_2 (~11.1s)
+        )
+
+        result = estimate_waves_from_accel(signal, fs=fs)
+        assert result.spectral_partitions is not None
+        parts = result.spectral_partitions
+        labels = {p.component_type for p in parts}
+        assert "wind_wave" in labels
+        assert any(lbl.startswith("swell_") for lbl in labels)
+
+        for p in parts:
+            assert isinstance(p, WavePartition)
+            assert p.hs_m > 0
+            assert p.peak_freq_hz > 0
+            assert p.peak_period_s > 0
+            assert 0.0 <= p.confidence <= 1.0
+
+    def test_partition_labeling_by_frequency(self) -> None:
+        fs = 50.0
+        duration = 180.0
+        t = np.arange(0, duration, 1.0 / fs)
+        signal = (
+            0.5 * np.sin(2 * math.pi * 0.30 * t)
+            + 0.8 * np.sin(2 * math.pi * 0.14 * t)
+            + 0.7 * np.sin(2 * math.pi * 0.08 * t)
+        )
+
+        result = estimate_waves_from_accel(signal, fs=fs)
+        assert result.spectral_partitions is not None
+        by_label = {p.component_type: p for p in result.spectral_partitions}
+        assert "wind_wave" in by_label
+        swells = sorted(
+            [p for p in result.spectral_partitions if p.component_type.startswith("swell_")],
+            key=lambda x: x.peak_freq_hz,
+            reverse=True,
+        )
+        assert len(swells) >= 1
+        assert by_label["wind_wave"].peak_freq_hz > swells[0].peak_freq_hz

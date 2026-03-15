@@ -36,7 +36,7 @@ import logging
 import math
 from collections import deque
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Deque, Optional, Tuple
+from typing import TYPE_CHECKING, Deque, List, Optional, Tuple
 
 import numpy as np
 from scipy import signal as scipy_signal
@@ -636,12 +636,163 @@ class WaveEstimate:
     # Spectral integration Hs (m0-based, independent of peak freq)
     spectral_hs: Optional[float] = None
 
+    # Multi-peak spectral partitions (wind-wave + up to two swell components)
+    spectral_partitions: Optional[List["WavePartition"]] = None
+
     # Accel statistics used
     accel_dominant_freq: Optional[float] = None
     accel_dominant_period: Optional[float] = None
     accel_freq_confidence: Optional[float] = None
     accel_rms: Optional[float] = None
     accel_max: Optional[float] = None
+
+
+@dataclass
+class WavePartition:
+    """Single wave partition derived from displacement PSD.
+
+    component_type is one of: wind_wave, swell_1, swell_2.
+    """
+
+    component_type: str
+    peak_freq_hz: float
+    peak_period_s: float
+    hs_m: float
+    m0: float
+    freq_min_hz: float
+    freq_max_hz: float
+    confidence: float
+
+
+def _extract_wave_partitions(
+    freqs: np.ndarray,
+    psd_disp: np.ndarray,
+    freq_min_hz: float,
+    freq_max_hz: float,
+    max_peaks: int = 3,
+) -> List[WavePartition]:
+    """Extract up to three wave partitions from displacement PSD.
+
+    Uses peak prominence to identify significant peaks, then partitions the
+    spectrum by local minima between adjacent peaks. Computes partition Hs from
+    m0 per partition: Hs = 4*sqrt(m0).
+    """
+    mask = (
+        np.isfinite(freqs)
+        & np.isfinite(psd_disp)
+        & (freqs > freq_min_hz)
+        & (freqs <= freq_max_hz)
+        & (psd_disp > 0)
+    )
+    if np.count_nonzero(mask) < 8:
+        return []
+
+    f = freqs[mask]
+    p = psd_disp[mask]
+    if len(f) < 8:
+        return []
+
+    prominence = float(np.max(p)) * 0.02
+    distance = max(1, len(f) // 20)
+    peaks, props = scipy_signal.find_peaks(p, prominence=prominence, distance=distance)
+    if len(peaks) == 0:
+        return []
+
+    prominences = props.get("prominences", np.zeros(len(peaks)))
+    ranked = sorted(
+        zip(peaks, prominences),
+        key=lambda x: float(x[1]),
+        reverse=True,
+    )[:max_peaks]
+    peak_idx = sorted(int(i) for i, _ in ranked)
+    if len(peak_idx) == 0:
+        return []
+
+    bounds: List[Tuple[int, int]] = []
+    start = 0
+    for left_peak, right_peak in zip(peak_idx[:-1], peak_idx[1:]):
+        valley_rel = int(np.argmin(p[left_peak:right_peak + 1]))
+        valley_idx = left_peak + valley_rel
+        bounds.append((start, valley_idx))
+        start = valley_idx + 1
+    bounds.append((start, len(f) - 1))
+
+    total_m0 = 0.0
+    parts_raw: List[Tuple[int, float, float, float, float, float, int, int]] = []
+    _trapz = getattr(np, "trapezoid", getattr(np, "trapz", None))
+    if _trapz is None:
+        return []
+
+    for b_start, b_end in bounds:
+        if b_end <= b_start + 1:
+            continue
+        f_seg = f[b_start:b_end + 1]
+        p_seg = p[b_start:b_end + 1]
+        m0 = float(_trapz(p_seg, f_seg))
+        if m0 <= 0:
+            continue
+
+        peak_local = int(np.argmax(p_seg))
+        peak_global = b_start + peak_local
+        peak_freq = float(f[peak_global])
+        peak_period = 1.0 / peak_freq if peak_freq > 0 else 0.0
+        hs = 4.0 * math.sqrt(m0)
+
+        total_m0 += m0
+        parts_raw.append(
+            (
+                peak_global,
+                peak_freq,
+                peak_period,
+                hs,
+                m0,
+                float(np.max(p_seg)),
+                b_start,
+                b_end,
+            )
+        )
+
+    if not parts_raw or total_m0 <= 0:
+        return []
+
+    # Label by frequency: highest freq is wind-wave, lower freqs are swells.
+    by_freq_desc = sorted(parts_raw, key=lambda x: x[1], reverse=True)
+    component_map: dict[int, str] = {}
+    if len(by_freq_desc) >= 1:
+        component_map[by_freq_desc[0][0]] = "wind_wave"
+    if len(by_freq_desc) >= 2:
+        component_map[by_freq_desc[1][0]] = "swell_1"
+    if len(by_freq_desc) >= 3:
+        component_map[by_freq_desc[2][0]] = "swell_2"
+
+    out: List[WavePartition] = []
+    for peak_global, peak_freq, peak_period, hs, m0, pmax, b_start, b_end in parts_raw:
+        label = component_map.get(peak_global)
+        if label is None:
+            continue
+
+        # Confidence from energy share and peak sharpness proxy.
+        energy_share = float(np.clip(m0 / total_m0, 0.0, 1.0))
+        sharpness = float(np.clip(pmax / (np.mean(p) + 1e-12) / 10.0, 0.0, 1.0))
+        conf = float(np.clip(0.7 * energy_share + 0.3 * sharpness, 0.0, 1.0))
+
+        out.append(
+            WavePartition(
+                component_type=label,
+                peak_freq_hz=peak_freq,
+                peak_period_s=peak_period,
+                hs_m=hs,
+                m0=m0,
+                freq_min_hz=float(f[b_start]),
+                freq_max_hz=float(f[b_end]),
+                confidence=conf,
+            )
+        )
+
+    # Sort deterministic for downstream consumers.
+    order = {"wind_wave": 0, "swell_1": 1, "swell_2": 2}
+    out.sort(key=lambda w: order.get(w.component_type, 99))
+    return out
 
 
 def estimate_waves_from_accel(
@@ -768,6 +919,19 @@ def estimate_waves_from_accel(
 
     if psd_disp[valid_mask].max() == 0:
         return result
+
+    # --- Multi-peak spectral partitions (wind-wave + swells) --- #
+    try:
+        result.spectral_partitions = _extract_wave_partitions(
+            freqs=freqs,
+            psd_disp=psd_disp,
+            freq_min_hz=freq_min_hz,
+            freq_max_hz=freq_max_hz,
+            max_peaks=3,
+        )
+    except Exception as exc:
+        logger.debug("partition extraction failed: %s", exc)
+        result.spectral_partitions = None
 
     idx = int(np.argmax(psd_disp))
     dom_freq = float(freqs[idx])

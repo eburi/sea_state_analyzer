@@ -689,6 +689,13 @@ class FeatureExtractor:
         now = wf.timestamp
         me = MotionEstimate(timestamp=now, window_s=float(window_s))
 
+        # Record latest known position for downstream training joins.
+        buf = self._buffers.get(window_s)
+        if buf is not None and len(buf) > 0:
+            latest = buf[-1]
+            me.latitude = latest.latitude
+            me.longitude = latest.longitude
+
         # ---- motion severity ---- #
         severity = self._compute_severity(wf)
         me.motion_severity = severity
@@ -946,6 +953,25 @@ class FeatureExtractor:
             me.accel_dominant_period = round(wave_est.accel_dominant_period, 2)
         if wave_est.accel_freq_confidence is not None:
             me.accel_freq_confidence = round(wave_est.accel_freq_confidence, 3)
+
+        # Populate partition-level spectral wave features.
+        if wave_est.spectral_partitions:
+            for part in wave_est.spectral_partitions:
+                if part.component_type == "wind_wave":
+                    me.wind_wave_height = round(part.hs_m, 3)
+                    me.wind_wave_period = round(part.peak_period_s, 2)
+                    me.wind_wave_freq = round(part.peak_freq_hz, 4)
+                    me.wind_wave_confidence = round(part.confidence, 3)
+                elif part.component_type == "swell_1":
+                    me.swell_1_height = round(part.hs_m, 3)
+                    me.swell_1_period = round(part.peak_period_s, 2)
+                    me.swell_1_freq = round(part.peak_freq_hz, 4)
+                    me.swell_1_confidence = round(part.confidence, 3)
+                elif part.component_type == "swell_2":
+                    me.swell_2_height = round(part.hs_m, 3)
+                    me.swell_2_period = round(part.peak_period_s, 2)
+                    me.swell_2_freq = round(part.peak_freq_hz, 4)
+                    me.swell_2_confidence = round(part.confidence, 3)
 
         # RAO correction: if hull parameters are available, correct Hs for
         # hull amplification/attenuation at the observed wave period.
