@@ -1,5 +1,5 @@
 name: Sea State Analyzer
-version: "0.1.0"
+version: "0.1.1"
 slug: sea_state_analyzer
 description: >-
   Sea-state estimation from Signal K vessel data and onboard IMU.
@@ -33,7 +33,7 @@ map:
   - share:rw
 # User-configurable options (available in /data/options.json)
 options:
-  signalk_url: "http://primrose.local:3000"
+  signalk_url: "http://homeassistant.local:3000"
   sample_rate_hz: 2.0
   imu_enabled: true
   imu_auto_detect: true

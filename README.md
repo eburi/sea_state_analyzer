@@ -54,7 +54,9 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 # 3. Verify Signal K reachability (optional)
-curl http://primrose.local:3000/signalk
+# Note: If running as a Home Assistant addon, use http://homeassistant.local:3000 
+# (or the specific hostname of your Signal K addon if different).
+curl http://homeassistant.local:3000/signalk
 
 # All commands below are run from the project root.
 # The entry point is src/main.py.
@@ -275,8 +277,8 @@ All parameters are in `config.py`.  Notable defaults:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `base_url` | `http://primrose.local:3000` | Signal K base URL |
-| `ws_url` | `ws://primrose.local:3000/signalk/v1/stream?subscribe=none` | WebSocket URL |
+| `base_url` | `http://homeassistant.local:3000` | Signal K base URL |
+| `ws_url` | `ws://homeassistant.local:3000/signalk/v1/stream?subscribe=none` | WebSocket URL |
 | `sample_rate_hz` | `2.0` | InstantSample production rate |
 | `rolling_windows_s` | `[10, 30, 60, 300]` | Feature window sizes (s) |
 | `stale_threshold_s` | `10.0` | Age before a field is flagged stale |
