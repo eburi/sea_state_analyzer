@@ -240,13 +240,17 @@ async def test_on_connect_callbacks_fire_on_connect():
         # Receive and discard the subscription message
         await ws.recv()
         # Send one delta then close
-        delta = json.dumps({
-            "context": "vessels.self",
-            "updates": [{
-                "values": [{"path": "navigation.attitude.roll", "value": 0.01}],
-                "timestamp": "2024-01-01T00:00:00Z",
-            }],
-        })
+        delta = json.dumps(
+            {
+                "context": "vessels.self",
+                "updates": [
+                    {
+                        "values": [{"path": "navigation.attitude.roll", "value": 0.01}],
+                        "timestamp": "2024-01-01T00:00:00Z",
+                    }
+                ],
+            }
+        )
         await ws.send(delta)
         await ws.close()
 
@@ -282,13 +286,17 @@ async def test_on_connect_callback_error_does_not_break_streaming():
         hello = json.dumps({"name": "test", "version": "0.0.1", "self": "vessels.self"})
         await ws.send(hello)
         await ws.recv()  # subscription
-        delta = json.dumps({
-            "context": "vessels.self",
-            "updates": [{
-                "values": [{"path": "navigation.attitude.roll", "value": 0.01}],
-                "timestamp": "2024-01-01T00:00:00Z",
-            }],
-        })
+        delta = json.dumps(
+            {
+                "context": "vessels.self",
+                "updates": [
+                    {
+                        "values": [{"path": "navigation.attitude.roll", "value": 0.01}],
+                        "timestamp": "2024-01-01T00:00:00Z",
+                    }
+                ],
+            }
+        )
         await ws.send(delta)
         await ws.close()
 

@@ -249,9 +249,7 @@ def classify_beaufort(wind_speed_ms: Optional[float]) -> Optional[BeaufortForce]
             return BeaufortForce(force=force, label=label, wind_speed_ms=wind_speed_ms)
 
     # ≥ 32.7 m/s
-    return BeaufortForce(
-        force=12, label="Hurricane force", wind_speed_ms=wind_speed_ms
-    )
+    return BeaufortForce(force=12, label="Hurricane force", wind_speed_ms=wind_speed_ms)
 
 
 # --------------------------------------------------------------------------- #

@@ -159,9 +159,7 @@ class TerminalPlotter:
                     f"Swell={me.douglas_swell}({me.douglas_swell_label})"
                 )
             if me.beaufort_force is not None:
-                scale_parts.append(
-                    f"Bft={me.beaufort_force}({me.beaufort_label})"
-                )
+                scale_parts.append(f"Bft={me.beaufort_force}({me.beaufort_label})")
             if scale_parts:
                 lines.append(f"  scales: {' '.join(scale_parts)}")
 

@@ -480,23 +480,23 @@ class TestDouglasSwell:
         "height, wavelength, expected_degree",
         [
             # Low height
-            (0.5, 50.0, 1),    # low + short
-            (0.5, 100.0, 1),   # low + average
-            (0.5, 150.0, 1),   # low + average
-            (0.5, 200.0, 1),   # low + average
-            (0.5, 250.0, 2),   # low + long
+            (0.5, 50.0, 1),  # low + short
+            (0.5, 100.0, 1),  # low + average
+            (0.5, 150.0, 1),  # low + average
+            (0.5, 200.0, 1),  # low + average
+            (0.5, 250.0, 2),  # low + long
             # Moderate height
-            (2.5, 50.0, 3),    # moderate + short
-            (2.5, 100.0, 4),   # moderate + average
-            (2.5, 150.0, 4),   # moderate + average
-            (2.5, 200.0, 4),   # moderate + average
-            (2.5, 250.0, 5),   # moderate + long
+            (2.5, 50.0, 3),  # moderate + short
+            (2.5, 100.0, 4),  # moderate + average
+            (2.5, 150.0, 4),  # moderate + average
+            (2.5, 200.0, 4),  # moderate + average
+            (2.5, 250.0, 5),  # moderate + long
             # High height
-            (5.0, 50.0, 6),    # high + short
-            (5.0, 100.0, 7),   # high + average
-            (5.0, 150.0, 7),   # high + average
-            (5.0, 200.0, 7),   # high + average
-            (5.0, 250.0, 8),   # high + long
+            (5.0, 50.0, 6),  # high + short
+            (5.0, 100.0, 7),  # high + average
+            (5.0, 150.0, 7),  # high + average
+            (5.0, 200.0, 7),  # high + average
+            (5.0, 250.0, 8),  # high + long
         ],
     )
     def test_height_wavelength_matrix(
@@ -832,7 +832,10 @@ class TestPublisherIntegration:
         values = _motion_estimate_to_values(me)
         by_path = {v["path"]: v["value"] for v in values}
         assert by_path[WAVE_DOUGLAS_SWELL] == 5
-        assert by_path[WAVE_DOUGLAS_SWELL_LABEL] == "Moderate rough (long and moderate wave)"
+        assert (
+            by_path[WAVE_DOUGLAS_SWELL_LABEL]
+            == "Moderate rough (long and moderate wave)"
+        )
 
     def test_beaufort_in_values(self) -> None:
         me = _make_estimate(beaufort_force=6, beaufort_label="Strong breeze")

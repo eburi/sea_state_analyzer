@@ -218,13 +218,9 @@ WAVE_SWELL_2_CONFIDENCE = "environment.water.waves.swell2.confidence"  # 0–1
 
 # Douglas sea-state scale (WMO Code 3700)
 WAVE_DOUGLAS_SEA_STATE = "environment.water.waves.douglasSeaState"  # integer 0–9
-WAVE_DOUGLAS_SEA_STATE_LABEL = (
-    "environment.water.waves.douglasSeaStateLabel"  # string
-)
+WAVE_DOUGLAS_SEA_STATE_LABEL = "environment.water.waves.douglasSeaStateLabel"  # string
 WAVE_DOUGLAS_SWELL = "environment.water.waves.douglasSwell"  # integer 0–9
-WAVE_DOUGLAS_SWELL_LABEL = (
-    "environment.water.waves.douglasSwellLabel"  # string
-)
+WAVE_DOUGLAS_SWELL_LABEL = "environment.water.waves.douglasSwellLabel"  # string
 
 # Beaufort wind force scale
 WAVE_BEAUFORT_FORCE = "environment.water.waves.beaufortForce"  # integer 0–12
