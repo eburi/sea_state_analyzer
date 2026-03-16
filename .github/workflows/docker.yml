@@ -23,6 +23,6 @@ jobs:
         uses: home-assistant/builder@2026.02.1
         with:
           args: |
-            --all \
+            --amd64 --aarch64 \
             --target sea_state_analyzer \
             --docker-hub ghcr.io/${{ github.repository_owner }}
