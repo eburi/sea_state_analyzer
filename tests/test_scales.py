@@ -22,9 +22,6 @@ from typing import Any
 import pytest
 
 from scales import (
-    BeaufortForce,
-    DouglasSeaState,
-    DouglasSwellState,
     beaufort_force_from_wind,
     beaufort_label_from_wind,
     classify_beaufort,

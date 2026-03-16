@@ -1,5 +1,5 @@
 name: Sea State Analyzer
-version: "1.0.0"
+version: "1.0.1"
 slug: sea_state_analyzer
 description: >-
   Sea-state estimation from Signal K vessel data and onboard IMU.
