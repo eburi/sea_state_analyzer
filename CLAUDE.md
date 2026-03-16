@@ -142,9 +142,35 @@ Position: `navigation.position`, `navigation.datetime`
 
 ## Feature extraction layers
 
-- **Layer A** – instantaneous derivatives (roll/pitch/yaw rate & acceleration, heading−COG, wind angles relative to bow, speed-normalised roll/pitch)
-- **Layer B** – rolling-window statistics per window [10s, 30s, 60s, 300s]: mean, std, RMS, peak-to-peak, kurtosis, crest factor, zero-crossing period, Welch PSD dominant frequency/period with confidence, spectral energy by band, spectral entropy, period stability
-- **Layer C** – inferred motion proxies: severity (0–1), regime (calm/moderate/active/heavy), encounter direction (beam_like/head_or_following_like/quartering_like/confused_like), regularity, dominant periods with confidence, comfort proxy, severity trend
+- **Layer A** – instantaneous derivatives (roll/pitch/yaw rate & acceleration, heading−COG, wind angles relative to bow, speed-normalised roll/pitch using STW with SOG fallback)
+- **Layer B** – rolling-window statistics per window [10s, 30s, 60s, 300s]: mean, std, RMS, peak-to-peak, kurtosis, crest factor, zero-crossing period, Welch PSD dominant frequency/period with confidence, spectral energy by band, spectral entropy, period stability, stw_var, current_drift_mean
+- **Layer C** – inferred motion proxies: severity (0–1), regime (calm/moderate/active/heavy), encounter direction (beam_like/head_or_following_like/quartering_like/confused_like), regularity, dominant periods with confidence, comfort proxy (0=uncomfortable, 1=comfortable), severity trend
+
+---
+
+## GPS vs non-GPS sensor strategy
+
+The sea-state feature pipeline minimises GPS dependency because GPS updates are slow (~1 Hz) and introduce latency that corrupts fast wave-motion analysis.
+
+| Feature | Preferred source | Fallback | Rationale |
+|---------|-----------------|----------|-----------|
+| `roll_normalized`, `pitch_normalized` | **STW** (speed through water, paddle wheel) | SOG (GPS) | STW updates faster, no GPS latency; removes current/leeway effects |
+| `heading_minus_cog`, `heading_cog_var` | headingTrue + COG (both OK) | — | Measures navigation/current characteristics (slow-changing), not fast wave motion |
+| Doppler correction (`delta_v`) | **STW** | None (skipped if unavailable) | Critical for accurate wave period estimation |
+| `stw_var` | STW | — | Rolling variance of speed through water |
+| `sog_var` | SOG | — | Kept for navigation/current analysis |
+| `current_drift_mean` | `environment.current.drift` | Defaults to 0.0 | Direct from Signal K; sanitised for unavailability |
+| Position (lat/lon) | GPS | — | No alternative source exists |
+
+**Key principle:** severity, regime, and comfort proxy computations use only roll_rms, pitch_rms, roll_spectral_energy, and yaw_rate_var — all GPS-free.
+
+---
+
+## Versioning
+
+`VERSION` is defined in `src/config.py` (currently `"0.3.0"`) and is included in every output row (samples parquet, features parquet, events JSONL, raw deltas JSONL) so training pipelines can partition data by software version.
+
+**Bump `VERSION` whenever a change likely affects the data model in a way that needs to be taken into account when training** — e.g. adding, removing, or renaming fields in `InstantSample`, `WindowFeatures`, or `MotionEstimate`; changing the scale or meaning of an existing field (like inverting comfort proxy); or altering how features are derived. This ensures training pipelines can partition or filter data by the version that produced it.
 
 ---
 

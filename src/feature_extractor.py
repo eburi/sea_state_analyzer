@@ -552,10 +552,14 @@ class FeatureExtractor:
             )
 
         # ---- speed-normalized roll / pitch ---- #
-        if sample.roll is not None and sample.sog is not None and sample.sog > 0.5:
-            out.roll_normalized = sample.roll / sample.sog
-        if sample.pitch is not None and sample.sog is not None and sample.sog > 0.5:
-            out.pitch_normalized = sample.pitch / sample.sog
+        # Prefer STW (speed through water) over SOG for normalisation.
+        # STW updates faster (no GPS latency) and is more physically
+        # meaningful — it removes current/leeway effects.
+        speed = sample.stw if sample.stw is not None else sample.sog
+        if sample.roll is not None and speed is not None and speed > 0.5:
+            out.roll_normalized = sample.roll / speed
+        if sample.pitch is not None and speed is not None and speed > 0.5:
+            out.pitch_normalized = sample.pitch / speed
 
         return out
 
@@ -654,6 +658,10 @@ class FeatureExtractor:
             wf.yaw_rate_var = float(np.var(rot))
         if len(sog) >= 2:
             wf.sog_var = float(np.var(sog))
+        # STW variance — preferred for real-time analysis (no GPS latency)
+        stw_arr = _arr("stw")
+        if len(stw_arr) >= 2:
+            wf.stw_var = float(np.var(stw_arr))
         if len(heading) >= 2 and len(cog) >= 2:
             min_len = min(len(heading), len(cog))
             diff = np.array(
@@ -670,10 +678,18 @@ class FeatureExtractor:
             )
 
         # ---- STW statistics (for Doppler correction quality) ---- #
-        stw_arr = _arr("stw")
-        if len(stw_arr) >= 2:
-            wf.stw_mean = float(np.mean(stw_arr))
-            wf.stw_std = float(np.std(stw_arr))
+        stw_arr2 = _arr("stw")
+        if len(stw_arr2) >= 2:
+            wf.stw_mean = float(np.mean(stw_arr2))
+            wf.stw_std = float(np.std(stw_arr2))
+
+        # ---- current drift statistics ---- #
+        # environment.current.drift — sanitise: treat unavailable as 0.
+        drift_arr = _arr("current_drift")
+        if len(drift_arr) >= 1:
+            wf.current_drift_mean = float(np.mean(drift_arr))
+        else:
+            wf.current_drift_mean = 0.0
 
         # ---- rudder angle statistics (for manoeuvre detection) ---- #
         rudder = _arr("rudder_angle")
@@ -1412,12 +1428,13 @@ def _estimate_regularity(wf: WindowFeatures) -> Tuple[float, str]:
 
 
 def _comfort_proxy(wf: WindowFeatures, severity_smoothed: float) -> float:
-    """Simple comfort proxy 0 (comfortable) to 1 (very uncomfortable)."""
+    """Comfort proxy: 0 (very uncomfortable) to 1 (comfortable)."""
     # Blend severity with crest factor penalty
     cf_roll = wf.roll_crest_factor or 1.4
     cf_pitch = wf.pitch_crest_factor or 1.4
     cf_penalty = min(1.0, (max(cf_roll, cf_pitch) - 1.0) / 4.0)
-    return float(np.clip(0.7 * severity_smoothed + 0.3 * cf_penalty, 0.0, 1.0))
+    discomfort = float(np.clip(0.7 * severity_smoothed + 0.3 * cf_penalty, 0.0, 1.0))
+    return 1.0 - discomfort
 
 
 def _overall_confidence(

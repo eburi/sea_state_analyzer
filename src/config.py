@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 import logging
 
+# Semantic version — bump on every change that affects output schema or
+# feature computation so that training pipelines can filter / partition
+# data by version.
+VERSION: str = "0.3.0"
+
 
 @dataclass
 class Config:

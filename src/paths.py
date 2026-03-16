@@ -337,7 +337,7 @@ WAVE_PATH_META: Dict[str, Dict[str, object]] = {
     },
     WAVE_COMFORT_PROXY: {
         "units": "ratio",
-        "description": "Comfort proxy combining motion severity and regularity (0 = comfortable, 1 = uncomfortable)",
+        "description": "Comfort proxy combining motion severity and regularity (0 = uncomfortable, 1 = comfortable)",
         "displayName": "Comfort",
         "shortName": "Cmft",
         "displayScale": {"lower": 0, "upper": 1, "type": "linear"},

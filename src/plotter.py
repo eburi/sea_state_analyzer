@@ -365,21 +365,31 @@ class FilePlotter:
         plt.close(fig)
 
     def _plot_pitch_vs_sog(self, samples: List[InstantSample]) -> None:
+        # Prefer STW (speed through water) over SOG for real-time relevance.
+        # Fall back to SOG if STW is unavailable.
+        def _speed(s: InstantSample) -> Optional[float]:
+            return s.stw if s.stw is not None else s.sog
 
-        sog = [x.sog for x in samples if x.sog is not None and x.pitch is not None]
+        speed_vals = [
+            _speed(x) for x in samples if _speed(x) is not None and x.pitch is not None
+        ]
         pitch_vals = [
             math.degrees(abs(x.pitch))
             for x in samples
-            if x.sog is not None and x.pitch is not None
+            if _speed(x) is not None and x.pitch is not None
         ]
-        if len(sog) < 10:
+        if len(speed_vals) < 10:
             return
 
+        # Determine label: if any sample used STW, note it
+        has_stw = any(x.stw is not None for x in samples if x.pitch is not None)
+        speed_label = "STW (m/s)" if has_stw else "SOG (m/s)"
+
         fig, ax = plt.subplots(figsize=(7, 5))
-        ax.scatter(sog, pitch_vals, s=3, alpha=0.3, color="coral")
-        ax.set_xlabel("SOG (m/s)")
+        ax.scatter(speed_vals, pitch_vals, s=3, alpha=0.3, color="coral")
+        ax.set_xlabel(speed_label)
         ax.set_ylabel("|Pitch| (deg)")
-        ax.set_title("Pitch magnitude vs Speed Over Ground")
+        ax.set_title(f"Pitch magnitude vs {speed_label.split(' ')[0]}")
         plt.tight_layout()
         fig.savefig(self._dir / "plot_pitch_vs_sog.png", dpi=100)
         plt.close(fig)

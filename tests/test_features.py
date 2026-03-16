@@ -38,6 +38,7 @@ def _sample(
     sog: float = 3.0,
     heading: float = 0.0,
     cog: float = 0.0,
+    stw: float = 3.0,
 ) -> InstantSample:
     return InstantSample(
         timestamp=_ts(t),
@@ -47,6 +48,7 @@ def _sample(
         sog=sog,
         heading=heading,
         cog=cog,
+        stw=stw,
     )
 
 

@@ -24,7 +24,7 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from config import Config, DEFAULT_CONFIG
+from config import Config, DEFAULT_CONFIG, VERSION
 from models import InstantSample, MotionEstimate, RawDeltaMessage, WindowFeatures
 
 logger = logging.getLogger(__name__)
@@ -49,6 +49,7 @@ def _ts_epoch(dt: Optional[datetime]) -> Optional[float]:
 
 def _sample_to_row(s: InstantSample) -> Dict[str, Any]:
     row: Dict[str, Any] = {
+        "version": VERSION,
         "timestamp": _ts_str(s.timestamp),
         "timestamp_epoch": _ts_epoch(s.timestamp),
         "roll": s.roll,
@@ -56,12 +57,14 @@ def _sample_to_row(s: InstantSample) -> Dict[str, Any]:
         "yaw": s.yaw,
         "rate_of_turn": s.rate_of_turn,
         "sog": s.sog,
+        "stw": s.stw,
         "cog": s.cog,
         "heading": s.heading,
         "wind_speed_true": s.wind_speed_true,
         "wind_angle_true": s.wind_angle_true,
         "wind_speed_apparent": s.wind_speed_apparent,
         "wind_angle_apparent": s.wind_angle_apparent,
+        "current_drift": s.current_drift,
         "latitude": s.latitude,
         "longitude": s.longitude,
     }
@@ -75,6 +78,7 @@ def _sample_to_row(s: InstantSample) -> Dict[str, Any]:
 
 def _window_features_to_row(wf: WindowFeatures) -> Dict[str, Any]:
     row: Dict[str, Any] = {
+        "version": VERSION,
         "timestamp": _ts_str(wf.timestamp),
         "timestamp_epoch": _ts_epoch(wf.timestamp),
         "window_s": wf.window_s,
@@ -103,9 +107,11 @@ def _window_features_to_row(wf: WindowFeatures) -> Dict[str, Any]:
         "pitch_spectral_energy": wf.pitch_spectral_energy,
         "yaw_rate_var": wf.yaw_rate_var,
         "sog_var": wf.sog_var,
+        "stw_var": wf.stw_var,
         "heading_cog_var": wf.heading_cog_var,
         "wind_speed_var": wf.wind_speed_var,
         "wind_angle_var": wf.wind_angle_var,
+        "current_drift_mean": wf.current_drift_mean,
         "spectral_entropy_roll": wf.spectral_entropy_roll,
         "spectral_entropy_pitch": wf.spectral_entropy_pitch,
         "roll_period_stability": wf.roll_period_stability,
@@ -123,6 +129,7 @@ def _window_features_to_row(wf: WindowFeatures) -> Dict[str, Any]:
 
 def _motion_estimate_to_event(me: MotionEstimate) -> Dict[str, Any]:
     d: Dict[str, Any] = {
+        "version": VERSION,
         "timestamp": _ts_str(me.timestamp),
         "timestamp_epoch": _ts_epoch(me.timestamp),
         "window_s": me.window_s,
@@ -242,6 +249,7 @@ class Recorder:
         try:
             line = json.dumps(
                 {
+                    "version": VERSION,
                     "received_at": _ts_str(delta.received_at),
                     "context": delta.context,
                     "raw": delta.raw,

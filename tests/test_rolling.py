@@ -40,6 +40,7 @@ def _make_samples(
                 pitch=pitch,
                 yaw=0.0,
                 sog=3.0,
+                stw=3.0,
                 heading=1.0,
                 cog=1.0,
                 rate_of_turn=0.0,

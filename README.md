@@ -36,7 +36,7 @@ src/
   recorder.py          – batched JSONL + Parquet output
   plotter.py           – console summaries + optional matplotlib PNGs
   main.py              – CLI entry point: live / inspect / replay modes
-tests/                 – pytest unit tests (502 tests)
+tests/                 – pytest unit tests (699 tests)
 conftest.py            – adds src/ to sys.path for pytest
 sea_state_analyzer/    – Home Assistant App packaging (config.yaml, Dockerfile, run.sh)
 ```
@@ -168,7 +168,7 @@ Each line is a JSON object with these fields (None values omitted):
 | `true_wave_period` | seconds | Doppler-corrected true wave period |
 | `true_wavelength` | metres | True wavelength (deep-water dispersion) |
 | `encounter_direction` | string | beam_like / head_or_following_like / ... |
-| `comfort_proxy` | 0–1 | Motion comfort index |
+| `comfort_proxy` | 0–1 | Motion comfort index (0 = uncomfortable, 1 = comfortable) |
 | `wind_wave_height` | metres | Hs of wind-wave spectral partition |
 | `wind_wave_period` | seconds | Peak period of wind-wave partition |
 | `wind_wave_confidence` | 0–1 | Confidence in wind-wave partition |
@@ -182,6 +182,10 @@ Each line is a JSON object with these fields (None values omitted):
 All Parquet files include `timestamp` (ISO-8601 string) and `timestamp_epoch`
 (float Unix seconds) columns, plus freshness metadata columns (`age_*`,
 `valid_*`) on every sample row.
+
+All output files (Parquet, JSONL events, raw deltas) include a `version` field
+containing the software version from `config.py`, so training pipelines can
+partition or filter data by the version that produced it.
 
 ---
 
@@ -290,6 +294,41 @@ All parameters are in `config.py`.  Notable defaults:
 
 ---
 
+## Versioning
+
+`VERSION` is defined in `src/config.py` (currently `"0.3.0"`) and is included
+in every output row (samples Parquet, features Parquet, events JSONL, raw
+deltas JSONL) so training pipelines can partition data by software version.
+
+**Bump `VERSION`** whenever a change likely affects the data model in a way
+that needs to be taken into account when training — e.g. adding, removing, or
+renaming fields in `InstantSample`, `WindowFeatures`, or `MotionEstimate`;
+changing the scale or meaning of an existing field (like inverting comfort
+proxy); or altering how features are derived.
+
+---
+
+## GPS vs non-GPS sensor strategy
+
+The feature pipeline minimises GPS dependency because GPS updates are slow
+(~1 Hz) and introduce latency that corrupts fast wave-motion analysis.
+
+| Feature | Preferred source | Fallback | Rationale |
+|---------|-----------------|----------|-----------|
+| `roll_normalized`, `pitch_normalized` | **STW** (speed through water, paddle wheel) | SOG (GPS) | STW updates faster, no GPS latency; removes current/leeway effects |
+| `heading_minus_cog`, `heading_cog_var` | headingTrue + COG (both OK) | — | Measures navigation/current characteristics (slow-changing), not fast wave motion |
+| Doppler correction (`delta_v`) | **STW** | None (skipped if unavailable) | Critical for accurate wave period estimation |
+| `stw_var` | STW | — | Rolling variance of speed through water |
+| `sog_var` | SOG | — | Kept for navigation/current analysis |
+| `current_drift_mean` | `environment.current.drift` | Defaults to 0.0 | Direct from Signal K; sanitised for unavailability |
+| Position (lat/lon) | GPS | — | No alternative source exists |
+
+**Key principle:** severity, regime, and comfort proxy computations use only
+`roll_rms`, `pitch_rms`, `roll_spectral_energy`, and `yaw_rate_var` — all
+GPS-free.
+
+---
+
 ## Feature description
 
 ### Layer A – Instantaneous derived values
@@ -300,7 +339,7 @@ Computed at the sample rate (2 Hz) from consecutive snapshots:
 - `roll_acceleration`, `pitch_acceleration` (rad/s²) – second derivative
 - `heading_minus_cog` (rad) – leeway/drift proxy
 - `wind_angle_true_bow`, `wind_angle_apparent_bow` (rad) – wind angle relative to bow
-- `roll_normalized`, `pitch_normalized` – motion per unit SOG
+- `roll_normalized`, `pitch_normalized` – motion per unit speed (STW preferred, SOG fallback)
 
 ### Layer B – Rolling-window statistics
 
@@ -312,7 +351,7 @@ Computed per configured window (10 s, 30 s, 60 s, 5 min):
 - Spectral energy per frequency band (0.05–0.1, 0.1–0.2, 0.2–0.4, 0.4–1.0 Hz)
 - Spectral entropy (regularity indicator)
 - Dominant period stability (std across recent windows)
-- Yaw-rate variance, SOG variance, heading-COG variance, wind variance
+- Yaw-rate variance, SOG variance, STW variance, heading-COG variance, wind variance, current drift mean
 
 ### Layer C – Inferred motion proxies
 
@@ -323,7 +362,7 @@ All labelled as inferred, not measured:
 - **Encounter direction proxy**: beam_like / head_or_following_like / quartering_like / confused_like / mixed
 - **Motion regularity**: regular / mixed / confused (from spectral entropy and period stability)
 - **Dominant motion period**: separate roll and pitch estimates with confidence, plus combined encounter period estimate
-- **Comfort proxy** (0–1): blend of severity and crest factor
+- **Comfort proxy** (0–1): blend of severity and crest factor (0 = uncomfortable, 1 = comfortable)
 - **Severity trend**: improving / stable / worsening (comparing 5-min to 15-min window)
 - **Overall confidence** (0–1): data completeness and spectral quality
 

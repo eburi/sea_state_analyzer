@@ -156,8 +156,10 @@ class LayerAFeatures:
     wind_angle_true_bow: Optional[float] = None  # rad, true wind angle relative to bow
     wind_angle_apparent_bow: Optional[float] = None
 
-    roll_normalized: Optional[float] = None  # roll / sog  (dimensionless proxy)
-    pitch_normalized: Optional[float] = None  # pitch / sog
+    roll_normalized: Optional[float] = (
+        None  # roll / speed  (STW preferred, SOG fallback)
+    )
+    pitch_normalized: Optional[float] = None  # pitch / speed
 
 
 # --------------------------------------------------------------------------- #
@@ -202,6 +204,7 @@ class WindowFeatures:
     # Cross-signal variance metrics
     yaw_rate_var: Optional[float] = None
     sog_var: Optional[float] = None
+    stw_var: Optional[float] = None
     heading_cog_var: Optional[float] = None
     wind_speed_var: Optional[float] = None
     wind_angle_var: Optional[float] = None
@@ -231,6 +234,9 @@ class WindowFeatures:
 
     # Depth statistics (for deep-water validation)
     depth_mean: Optional[float] = None
+
+    # Current drift (from environment.current.drift; 0 when unavailable)
+    current_drift_mean: Optional[float] = None  # m/s
 
 
 @dataclass
@@ -285,7 +291,7 @@ class MotionEstimate:
     motion_regularity: Optional[str] = None  # regular / confused / mixed
     confusion_index: Optional[float] = None  # 0=regular, 1=confused
 
-    # Comfort proxy (0=comfortable, 1=very uncomfortable)
+    # Comfort proxy (0=very uncomfortable, 1=comfortable)
     comfort_proxy: Optional[float] = None
 
     # Wave height estimation (from IMU accelerometer)
