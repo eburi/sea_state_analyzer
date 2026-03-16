@@ -321,6 +321,18 @@ class MotionEstimate:
     # RAO correction applied (hull amplification factor at observed period)
     rao_gain_applied: Optional[float] = None
 
+    # Douglas sea-state scale (WMO Code 3700) — from Hs
+    douglas_sea_state: Optional[int] = None  # degree 0-9
+    douglas_sea_state_label: Optional[str] = None  # e.g. "Moderate"
+
+    # Douglas swell scale (WMO Code 3701) — from swell Hs + wavelength
+    douglas_swell: Optional[int] = None  # degree 0-9
+    douglas_swell_label: Optional[str] = None
+
+    # Beaufort wind force — from true wind speed
+    beaufort_force: Optional[int] = None  # force 0-12
+    beaufort_label: Optional[str] = None  # e.g. "Strong breeze"
+
     # Overall confidence in the estimates
     overall_confidence: Optional[float] = None
 

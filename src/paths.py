@@ -216,6 +216,20 @@ WAVE_SWELL_2_HEIGHT = "environment.water.waves.swell2.height"  # metres
 WAVE_SWELL_2_PERIOD = "environment.water.waves.swell2.period"  # seconds
 WAVE_SWELL_2_CONFIDENCE = "environment.water.waves.swell2.confidence"  # 0–1
 
+# Douglas sea-state scale (WMO Code 3700)
+WAVE_DOUGLAS_SEA_STATE = "environment.water.waves.douglasSeaState"  # integer 0–9
+WAVE_DOUGLAS_SEA_STATE_LABEL = (
+    "environment.water.waves.douglasSeaStateLabel"  # string
+)
+WAVE_DOUGLAS_SWELL = "environment.water.waves.douglasSwell"  # integer 0–9
+WAVE_DOUGLAS_SWELL_LABEL = (
+    "environment.water.waves.douglasSwellLabel"  # string
+)
+
+# Beaufort wind force scale
+WAVE_BEAUFORT_FORCE = "environment.water.waves.beaufortForce"  # integer 0–12
+WAVE_BEAUFORT_LABEL = "environment.water.waves.beaufortLabel"  # string
+
 # All publish paths for iteration
 PUBLISH_PATHS: List[str] = [
     WAVE_SIGNIFICANT_HEIGHT,
@@ -239,6 +253,12 @@ PUBLISH_PATHS: List[str] = [
     WAVE_SWELL_2_HEIGHT,
     WAVE_SWELL_2_PERIOD,
     WAVE_SWELL_2_CONFIDENCE,
+    WAVE_DOUGLAS_SEA_STATE,
+    WAVE_DOUGLAS_SEA_STATE_LABEL,
+    WAVE_DOUGLAS_SWELL,
+    WAVE_DOUGLAS_SWELL_LABEL,
+    WAVE_BEAUFORT_FORCE,
+    WAVE_BEAUFORT_LABEL,
 ]
 
 # --------------------------------------------------------------------------- #
@@ -392,5 +412,64 @@ WAVE_PATH_META: Dict[str, Dict[str, object]] = {
         "displayName": "Swell 2 Confidence",
         "shortName": "C_s2",
         "displayScale": {"lower": 0, "upper": 1, "type": "linear"},
+    },
+    # Douglas sea-state scale (WMO Code 3700)
+    WAVE_DOUGLAS_SEA_STATE: {
+        "description": "Douglas sea-state degree (wind-sea) from significant wave height",
+        "displayName": "Douglas Sea State",
+        "shortName": "DSS",
+        "displayScale": {"lower": 0, "upper": 9, "type": "linear"},
+        "enum": [
+            "0 - Calm (glassy)",
+            "1 - Calm (rippled)",
+            "2 - Smooth",
+            "3 - Slight",
+            "4 - Moderate",
+            "5 - Rough",
+            "6 - Very rough",
+            "7 - High",
+            "8 - Very high",
+            "9 - Phenomenal",
+        ],
+    },
+    WAVE_DOUGLAS_SEA_STATE_LABEL: {
+        "description": "Douglas sea-state label (wind-sea)",
+        "displayName": "Douglas Sea State Label",
+        "shortName": "DSS Label",
+    },
+    WAVE_DOUGLAS_SWELL: {
+        "description": "Douglas swell degree from swell height and wavelength",
+        "displayName": "Douglas Swell",
+        "shortName": "DSwl",
+        "displayScale": {"lower": 0, "upper": 9, "type": "linear"},
+        "enum": [
+            "0 - No swell",
+            "1 - Very low",
+            "2 - Low",
+            "3 - Light",
+            "4 - Moderate",
+            "5 - Moderate rough",
+            "6 - Rough",
+            "7 - High",
+            "8 - Very high",
+            "9 - Confused",
+        ],
+    },
+    WAVE_DOUGLAS_SWELL_LABEL: {
+        "description": "Douglas swell label",
+        "displayName": "Douglas Swell Label",
+        "shortName": "DSwl Label",
+    },
+    # Beaufort wind force scale
+    WAVE_BEAUFORT_FORCE: {
+        "description": "Beaufort wind force number from true wind speed",
+        "displayName": "Beaufort Force",
+        "shortName": "Bft",
+        "displayScale": {"lower": 0, "upper": 12, "type": "linear"},
+    },
+    WAVE_BEAUFORT_LABEL: {
+        "description": "Beaufort wind force label",
+        "displayName": "Beaufort Label",
+        "shortName": "Bft Label",
     },
 }

@@ -18,8 +18,8 @@ class Config:
     # ------------------------------------------------------------------ #
     # Signal K connection                                                  #
     # ------------------------------------------------------------------ #
-    base_url: str = "http://primrose.local:3000"
-    ws_url: str = "ws://primrose.local:3000/signalk/v1/stream?subscribe=none"
+    base_url: str = "http://homeassistant.local:3000"
+    ws_url: str = "ws://homeassistant.local:3000/signalk/v1/stream?subscribe=none"
     vessel_self_context: str = "vessels.self"
 
     # Reconnect back-off delays in seconds

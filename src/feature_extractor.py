@@ -27,6 +27,11 @@ from scipy.stats import kurtosis as scipy_kurtosis
 
 from config import Config, DEFAULT_CONFIG
 from models import InstantSample, LayerAFeatures, MotionEstimate, WindowFeatures
+from scales import (
+    classify_beaufort,
+    classify_douglas_sea_state,
+    classify_douglas_swell,
+)
 
 # Heave/wave height estimation (optional -- degrades gracefully if unavailable)
 try:
@@ -770,6 +775,9 @@ class FeatureExtractor:
         # ---- wave height estimation from IMU accel data ---- #
         self._apply_wave_estimation(me, wf)
 
+        # ---- Douglas sea-state and Beaufort scale classification ---- #
+        self._apply_scale_classifications(me, wf)
+
         # ---- Phase 3: online learning observation + correction ---- #
         self._apply_learned_correction(me)
 
@@ -1038,6 +1046,43 @@ class FeatureExtractor:
                 float(np.clip(me.wave_height_confidence * hs_penalty, 0.0, 1.0)),
                 3,
             )
+
+    def _apply_scale_classifications(
+        self, me: MotionEstimate, wf: WindowFeatures
+    ) -> None:
+        """Apply Douglas sea-state scale and Beaufort classifications.
+
+        Douglas wind-sea: classify from significant_height (Hs).
+        Douglas swell: classify from primary swell component height + period.
+        Beaufort: classify from latest true wind speed in the buffer.
+        """
+        # ---- Douglas sea-state (wind-sea) from Hs ---- #
+        dss = classify_douglas_sea_state(me.significant_height)
+        if dss is not None:
+            me.douglas_sea_state = dss.degree
+            me.douglas_sea_state_label = dss.label
+
+        # ---- Douglas swell from primary swell partition ---- #
+        swell_hs = me.swell_1_height
+        swell_period = me.swell_1_period
+        dsw = classify_douglas_swell(
+            height_m=swell_hs,
+            period_s=swell_period,
+        )
+        if dsw is not None:
+            me.douglas_swell = dsw.degree
+            me.douglas_swell_label = dsw.label
+
+        # ---- Beaufort from true wind speed ---- #
+        # Use the latest sample in the primary window buffer for wind speed.
+        buf = self._buffers.get(int(me.window_s))
+        wind_speed: Optional[float] = None
+        if buf is not None and len(buf) > 0:
+            wind_speed = buf[-1].wind_speed_true
+        bft = classify_beaufort(wind_speed)
+        if bft is not None:
+            me.beaufort_force = bft.force
+            me.beaufort_label = bft.label
 
     def _apply_learned_correction(self, me: MotionEstimate) -> None:
         """Phase 3: observe + apply learned vessel-specific correction.

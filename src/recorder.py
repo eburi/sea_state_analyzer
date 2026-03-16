@@ -162,6 +162,12 @@ def _motion_estimate_to_event(me: MotionEstimate) -> Dict[str, Any]:
         "swell_2_confidence": me.swell_2_confidence,
         "severity_trend": me.severity_trend,
         "overall_confidence": me.overall_confidence,
+        "douglas_sea_state": me.douglas_sea_state,
+        "douglas_sea_state_label": me.douglas_sea_state_label,
+        "douglas_swell": me.douglas_swell,
+        "douglas_swell_label": me.douglas_swell_label,
+        "beaufort_force": me.beaufort_force,
+        "beaufort_label": me.beaufort_label,
     }
     # Strip None values for compact JSONL output
     return {k: v for k, v in d.items() if v is not None}

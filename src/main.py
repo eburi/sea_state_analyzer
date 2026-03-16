@@ -196,6 +196,31 @@ async def _live_mode(config: Config) -> None:
             )
         auth_ready.set()  # unblock publish_loop (it will still check _PUBLISHER_AVAILABLE)
 
+    # --- Register on-connect callback to publish metadata on every connect -- #
+    # Metadata must be re-sent on every reconnect because the Signal K
+    # server may have restarted and lost previously-received metadata.
+    # Only send when authenticated (auth_ready is set) so the server
+    # accepts the delta.
+    if config.publish_to_signalk and _PUBLISHER_AVAILABLE:
+
+        async def _send_meta_on_connect() -> None:
+            """on_connect callback: publish wave path metadata if authenticated."""
+            if not auth_ready.is_set():
+                logger.debug("Skipping meta publish — not yet authenticated")
+                return
+            meta_msg = build_meta_delta(self_context=client.self_context)
+            ok = await client.send(meta_msg)
+            if ok:
+                logger.info(
+                    "Published wave path metadata (%d bytes, %d paths)",
+                    len(meta_msg),
+                    len(WAVE_PATH_META),
+                )
+            else:
+                logger.warning("Failed to send wave path metadata on connect")
+
+        client.on_connect(_send_meta_on_connect)
+
     async def _auth_task() -> None:
         """Obtain Signal K auth token concurrently with other startup tasks.
 
@@ -216,11 +241,28 @@ async def _live_mode(config: Config) -> None:
                 auth = await ensure_auth_token(config)
                 if auth and auth.token:
                     client.set_auth_token(auth.token)
+                    # Mark auth ready *before* reconnect so the on_connect
+                    # callback sees the flag on the new connection.
+                    auth_ready.set()
                     logger.info(
                         "Authenticated — forcing reconnect for authenticated WebSocket"
                     )
+                    # Publish metadata immediately on the current connection
+                    # (if still open) so there is no gap between auth approval
+                    # and metadata availability.
+                    if _PUBLISHER_AVAILABLE:
+                        meta_msg = build_meta_delta(
+                            self_context=client.self_context,
+                        )
+                        ok = await client.send(meta_msg)
+                        if ok:
+                            logger.info(
+                                "Published wave path metadata after auth "
+                                "(%d bytes, %d paths)",
+                                len(meta_msg),
+                                len(WAVE_PATH_META),
+                            )
                     await client.reconnect()
-                    auth_ready.set()
                     return
                 else:
                     delay = backoff_delays[min(attempt, len(backoff_delays) - 1)]
@@ -486,6 +528,10 @@ async def _live_mode(config: Config) -> None:
         Requires a valid auth token to be set on the client (see signalk_auth).
         Skips silently when no estimate is available or not connected.
 
+        Metadata is published separately via an on_connect callback registered
+        on the client, so it is re-sent on every reconnect (the server may
+        have restarted and lost previously-received metadata).
+
         After the first successful send, validates that the data appears in
         the Signal K data model via REST API (echo-back check).
         """
@@ -494,33 +540,6 @@ async def _live_mode(config: Config) -> None:
         logger.info("Publish loop waiting for authentication…")
         await auth_ready.wait()
         logger.info("Publish loop: auth ready, starting delta publishing")
-
-        # Send metadata delta once so Signal K has units/descriptions.
-        # Wait for the WebSocket to reconnect (auth triggers a reconnect
-        # and there's a brief gap before the new connection is live).
-        meta_sent = False
-        meta_msg = build_meta_delta(self_context=client.self_context)
-        try:
-            for _attempt in range(10):
-                if client.connected:
-                    meta_ok = await client.send(meta_msg)
-                    if meta_ok:
-                        logger.info(
-                            "Published wave path metadata (%d bytes, %d paths)",
-                            len(meta_msg),
-                            len(WAVE_PATH_META),
-                        )
-                        meta_sent = True
-                        break
-                logger.debug("Waiting for WebSocket reconnect before sending meta…")
-                await asyncio.sleep(0.5)
-            if not meta_sent:
-                logger.warning(
-                    "Could not send wave path metadata after reconnect — "
-                    "will retry on first publish cycle"
-                )
-        except Exception as exc:
-            logger.warning("Error sending wave path metadata: %s", exc)
 
         publish_count = 0
         fail_count = 0
@@ -541,20 +560,6 @@ async def _live_mode(config: Config) -> None:
             ok = await client.send(msg)
             if ok:
                 publish_count += 1
-
-                # Retry meta send if it failed during initial reconnect
-                if not meta_sent:
-                    try:
-                        meta_ok = await client.send(meta_msg)
-                        if meta_ok:
-                            logger.info(
-                                "Published wave path metadata on retry (%d bytes, %d paths)",
-                                len(meta_msg),
-                                len(WAVE_PATH_META),
-                            )
-                            meta_sent = True
-                    except Exception:
-                        pass  # will retry next cycle
 
                 if publish_count <= 3 or publish_count % 100 == 0:
                     logger.info(

@@ -447,7 +447,7 @@ async def fetch_vessel_design(
     Parameters
     ----------
     base_url : str
-        Signal K server base URL (e.g. "http://primrose.local:3000").
+        Signal K server base URL (e.g. "http://homeassistant.local:3000").
     auth_token : str, optional
         JWT bearer token for authenticated access.
     timeout_s : float

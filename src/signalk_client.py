@@ -14,7 +14,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 import httpx
 import websockets
@@ -83,6 +83,7 @@ class SignalKClient:
         self._error_count: int = 0
         self._ws: Optional[Any] = None  # active websocket for bidirectional use
         self._auth_token: Optional[str] = None  # JWT for authenticated writes
+        self._on_connect_callbacks: List[Callable[[], Awaitable[None]]] = []
 
     # ------------------------------------------------------------------ #
     # Public                                                                #
@@ -115,6 +116,23 @@ class SignalKClient:
             logger.info("Auth token set on client (len=%d)", len(token))
         else:
             logger.info("Auth token cleared")
+
+    def on_connect(self, callback: Callable[[], Awaitable[None]]) -> None:
+        """Register an async callback to run after every successful connect.
+
+        Callbacks fire after the WebSocket is open, the hello message has
+        been received, and subscriptions have been sent — but before the
+        message streaming loop begins.  They run in order of registration.
+
+        Use this to publish metadata or perform other actions that must
+        be repeated on every reconnect (e.g. because the server may have
+        restarted and lost previously-sent metadata).
+
+        The callback receives no arguments; it should use a closure to
+        capture any needed state (e.g. the client instance for ``send()``).
+        Exceptions in callbacks are logged but do not prevent streaming.
+        """
+        self._on_connect_callbacks.append(callback)
 
     async def reconnect(self) -> None:
         """Force-close the current WebSocket to trigger a reconnect.
@@ -245,6 +263,13 @@ class SignalKClient:
             logger.info("Subscribed to %d self paths", len(SUBSCRIPTION_PATHS))
 
             self._connected = True
+
+            # ---- on-connect callbacks --------------------------------- #
+            for cb in self._on_connect_callbacks:
+                try:
+                    await cb()
+                except Exception as exc:
+                    logger.warning("on_connect callback failed: %s", exc)
 
             # ---- stream ----------------------------------------------- #
             async for raw_msg in ws:

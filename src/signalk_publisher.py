@@ -32,7 +32,13 @@ from typing import Any, Dict, List, Optional, Tuple
 from models import MotionEstimate
 from paths import (
     HEAVE,
+    WAVE_BEAUFORT_FORCE,
+    WAVE_BEAUFORT_LABEL,
     WAVE_COMFORT_PROXY,
+    WAVE_DOUGLAS_SEA_STATE,
+    WAVE_DOUGLAS_SEA_STATE_LABEL,
+    WAVE_DOUGLAS_SWELL,
+    WAVE_DOUGLAS_SWELL_LABEL,
     WAVE_ENCOUNTER_DIRECTION,
     WAVE_ENCOUNTER_PERIOD,
     WAVE_MOTION_REGIME,
@@ -134,6 +140,24 @@ def _motion_estimate_to_values(
         pairs.append((WAVE_SWELL_2_PERIOD, round(me.swell_2_period, 1)))
     if me.swell_2_confidence is not None:
         pairs.append((WAVE_SWELL_2_CONFIDENCE, round(me.swell_2_confidence, 2)))
+
+    # Douglas sea-state scale (integer 0-9)
+    if me.douglas_sea_state is not None:
+        pairs.append((WAVE_DOUGLAS_SEA_STATE, me.douglas_sea_state))
+    if me.douglas_sea_state_label is not None:
+        pairs.append((WAVE_DOUGLAS_SEA_STATE_LABEL, me.douglas_sea_state_label))
+
+    # Douglas swell scale (integer 0-9)
+    if me.douglas_swell is not None:
+        pairs.append((WAVE_DOUGLAS_SWELL, me.douglas_swell))
+    if me.douglas_swell_label is not None:
+        pairs.append((WAVE_DOUGLAS_SWELL_LABEL, me.douglas_swell_label))
+
+    # Beaufort wind force (integer 0-12)
+    if me.beaufort_force is not None:
+        pairs.append((WAVE_BEAUFORT_FORCE, me.beaufort_force))
+    if me.beaufort_label is not None:
+        pairs.append((WAVE_BEAUFORT_LABEL, me.beaufort_label))
 
     return [{"path": path, "value": value} for path, value in pairs]
 

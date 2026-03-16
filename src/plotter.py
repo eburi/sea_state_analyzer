@@ -148,6 +148,22 @@ class TerminalPlotter:
                     f"freq={_fmt(me.accel_dominant_freq, '.3f', 'Hz')} "
                     f"rao={_fmt(me.rao_gain_applied, '.3f')}"
                 )
+            # Scale classifications
+            scale_parts = []
+            if me.douglas_sea_state is not None:
+                scale_parts.append(
+                    f"Douglas={me.douglas_sea_state}({me.douglas_sea_state_label})"
+                )
+            if me.douglas_swell is not None:
+                scale_parts.append(
+                    f"Swell={me.douglas_swell}({me.douglas_swell_label})"
+                )
+            if me.beaufort_force is not None:
+                scale_parts.append(
+                    f"Bft={me.beaufort_force}({me.beaufort_label})"
+                )
+            if scale_parts:
+                lines.append(f"  scales: {' '.join(scale_parts)}")
 
         # Stale field warnings
         if sample is not None and sample.field_valid:
