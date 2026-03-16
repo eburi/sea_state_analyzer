@@ -168,9 +168,19 @@ The sea-state feature pipeline minimises GPS dependency because GPS updates are 
 
 ## Versioning
 
-`VERSION` is defined in `src/config.py` (currently `"0.3.0"`) and is included in every output row (samples parquet, features parquet, events JSONL, raw deltas JSONL) so training pipelines can partition data by software version.
+There are two independent version numbers:
 
-**Bump `VERSION` whenever a change likely affects the data model in a way that needs to be taken into account when training** — e.g. adding, removing, or renaming fields in `InstantSample`, `WindowFeatures`, or `MotionEstimate`; changing the scale or meaning of an existing field (like inverting comfort proxy); or altering how features are derived. This ensures training pipelines can partition or filter data by the version that produced it.
+### App version — `sea_state_analyzer/config.yaml`
+
+The `version` field in `config.yaml` (currently `"1.1.0"`) is the **release version** of the Home Assistant app. Bump this for every software change that requires a new deployment or publishing of the app — bug fixes, new features, dependency updates, config changes, etc. This version should also be **tagged in git** (e.g. `git tag v1.1.0`).
+
+### Data/training version — `src/config.py` `VERSION`
+
+`VERSION` in `src/config.py` (currently `"0.3.0"`) is the **output format version**. It is included in every output row (samples parquet, features parquet, events JSONL, raw deltas JSONL) so training pipelines can partition data by the version that produced it.
+
+**Bump `VERSION` whenever a change likely affects the data model in a way that needs to be taken into account when training** — e.g. adding, removing, or renaming fields in `InstantSample`, `WindowFeatures`, or `MotionEstimate`; changing the scale or meaning of an existing field (like inverting comfort proxy); or altering how features are derived.
+
+Not every app release requires a `VERSION` bump, and not every `VERSION` bump requires an app release (e.g. an offline replay-only change to feature extraction).
 
 ---
 
