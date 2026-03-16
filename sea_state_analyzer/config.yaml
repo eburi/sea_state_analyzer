@@ -10,7 +10,7 @@ description: >-
 url: "https://github.com/eburi/sea_state_analyzer"
 arch:
   - aarch64
-image: ghcr.io/eburi/sea_state_analyzer-addon:latest
+  - amd64
 init: false
 startup: services
 # I2C device access for IMU auto-detection.

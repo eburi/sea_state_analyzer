@@ -3,6 +3,6 @@
   "url": "https://github.com/eburi/sea_state_analyzer",
   "maintainer": "Erich Buri <erich@buri.com>",
   "images": [
-    "ghcr.io/eburi/sea_state_analyzer-addon:latest"
+    "ghcr.io/eburi/sea_state_analyzer:latest"
   ]
 }

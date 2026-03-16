@@ -1,4 +1,4 @@
-name: Build Docker Image
+name: Build and Publish
 
 on:
   push:
@@ -10,12 +10,14 @@ on:
 
 jobs:
   build:
+    name: Build add-on
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -28,24 +30,12 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository }}-addon
-          tags: |
-            type=ref,event=branch
-            type=sha,prefix=
-            type=ref,event=tag
-            type=raw,value=latest,enable={{is_default_branch}}
-
       - name: Build and push
-        uses: docker/build-push-action@v5
+        uses: home-assistant/builder@2025.02.1
         with:
-          context: ./sea_state_analyzer
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          platforms: linux/arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          args: |
+            --all \
+            --target sea_state_analyzer \
+            --docker-hub ghcr.io/${{ github.repository_owner }}
+        env:
+          DOCKERHUB_USERNAME: ${{ github.repository_owner }}

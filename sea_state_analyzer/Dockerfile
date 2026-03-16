@@ -1,4 +1,4 @@
-ARG BUILD_FROM=ghcr.io/home-assistant/aarch64-addon-base:latest
+ARG BUILD_FROM
 FROM $BUILD_FROM
 
 # Install Python and build tools for native extensions (numpy, scipy)
