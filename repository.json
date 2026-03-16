@@ -1,5 +1,8 @@
 {
   "name": "Sea State Analyzer",
   "url": "https://github.com/eburi/sea_state_analyzer",
-  "maintainer": "Erich Buri <erich@buri.com>"
+  "maintainer": "Erich Buri <erich@buri.com>",
+  "images": [
+    "ghcr.io/eburi/sea_state_analyzer-addon:latest"
+  ]
 }
