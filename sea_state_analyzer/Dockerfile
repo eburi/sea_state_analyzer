@@ -17,8 +17,8 @@ COPY requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
 
-# Copy application source (populated by deploy script)
-COPY src/ /app/src/
+# Copy application source
+COPY ../src/ /app/src/
 COPY run.sh /app/run.sh
 RUN chmod +x /app/run.sh
 
