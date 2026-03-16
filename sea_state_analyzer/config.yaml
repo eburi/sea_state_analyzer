@@ -1,5 +1,5 @@
 name: Sea State Analyzer
-version: "1.1.0"
+version: "1.1.1"
 slug: sea_state_analyzer
 description: >-
   Sea-state estimation from Signal K vessel data and onboard IMU.
@@ -8,10 +8,10 @@ description: >-
   (height, period, direction) back to Signal K as environment.water.waves.*
   deltas.
 url: "https://github.com/eburi/sea_state_analyzer"
+image: ghcr.io/eburi/sea_state_analyzer/{arch}
 arch:
   - aarch64
   - amd64
-image: ghcr.io/eburi/sea_state_analyzer/{arch}
 init: false
 startup: services
 # I2C device access for IMU auto-detection.

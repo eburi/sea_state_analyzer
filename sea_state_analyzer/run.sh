@@ -1,4 +1,4 @@
-#!/usr/bin/with-bashio
+#!/usr/bin/with-contenv bashio
 set -e
 
 # HA Add-on entry point for sea_state_analyzer.

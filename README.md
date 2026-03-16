@@ -493,7 +493,7 @@ default paths to use `/data/` and `/share/` volumes.
 
 ```bash
 # Copy files to HA host and rebuild
-bash sea_state_analyzer/deploy.sh root@192.168.46.222
+bash deploy.sh root@192.168.46.222
 
 # Rebuild and restart on HA
 ssh root@192.168.46.222 "ha apps rebuild local_sea_state_analyzer && ha apps start local_sea_state_analyzer"

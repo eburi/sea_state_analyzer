@@ -10,13 +10,14 @@ set -e
 #
 # This script:
 # 1. Assembles a self-contained addon directory in /tmp/sea_state_analyzer_addon/
-# 2. Copies it to /addons/sea_state_analyzer/ on the HA device via scp
+# 2. Cleans and copies it to /addons/sea_state_analyzer/ on the HA device via scp
 # 3. Prints instructions for installing/rebuilding in HA
 
 TARGET="${1:-root@192.168.46.222}"
 ADDON_NAME="sea_state_analyzer"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_DIR="$SCRIPT_DIR"
+ADDON_DIR="$PROJECT_DIR/sea_state_analyzer"
 BUILD_DIR="/tmp/${ADDON_NAME}_addon"
 
 echo "=== Deploying $ADDON_NAME to $TARGET ==="
@@ -27,14 +28,15 @@ echo ""
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
 
-# Copy HA addon files
-cp "$SCRIPT_DIR/config.yaml" "$BUILD_DIR/"
-cp "$SCRIPT_DIR/Dockerfile" "$BUILD_DIR/"
-cp "$SCRIPT_DIR/requirements.txt" "$BUILD_DIR/"
-cp "$SCRIPT_DIR/run.sh" "$BUILD_DIR/"
+# Copy HA addon files, stripping the 'image:' line so HA builds locally
+sed '/^image:/d' "$ADDON_DIR/config.yaml" > "$BUILD_DIR/config.yaml"
+cp "$ADDON_DIR/Dockerfile" "$BUILD_DIR/"
+cp "$ADDON_DIR/requirements.txt" "$BUILD_DIR/"
+cp "$ADDON_DIR/run.sh" "$BUILD_DIR/"
 
-# Copy source code
+# Copy source code (excluding __pycache__)
 cp -r "$PROJECT_DIR/src" "$BUILD_DIR/src"
+find "$BUILD_DIR/src" -type d -name '__pycache__' -exec rm -rf {} +
 
 echo "Assembled addon in $BUILD_DIR:"
 ls -la "$BUILD_DIR/"
@@ -43,9 +45,9 @@ echo "Source files:"
 ls -la "$BUILD_DIR/src/"
 echo ""
 
-# 2. Copy to HA device
-echo "Copying to $TARGET:/addons/$ADDON_NAME/ ..."
-ssh "$TARGET" "mkdir -p /addons/$ADDON_NAME"
+# 2. Clean and copy to HA device
+echo "Cleaning and copying to $TARGET:/addons/$ADDON_NAME/ ..."
+ssh "$TARGET" "rm -rf /addons/$ADDON_NAME && mkdir -p /addons/$ADDON_NAME"
 scp -r "$BUILD_DIR/"* "$TARGET:/addons/$ADDON_NAME/"
 
 echo ""
