@@ -11,7 +11,7 @@ RUN apk add --no-cache \
         build-base \
         musl-dev
 
-RUN pip3 install --no-cache-dir --break-system-packages maturin
+RUN pip3 install --no-cache-dir --break-system-packages 'maturin[patchelf]'
 
 COPY rust/ /tmp/rust/
 RUN cd /tmp/rust \
