@@ -14,7 +14,6 @@ from dataclasses import fields
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-import pytest
 
 from config import Config, DEFAULT_CONFIG
 from engine import (
@@ -40,6 +39,7 @@ from heave_estimator import (
 # Helpers                                                                      #
 # --------------------------------------------------------------------------- #
 
+
 def _python_config() -> Config:
     """Config that forces the Python engine."""
     return Config(engine="python")
@@ -50,8 +50,12 @@ def _rust_config() -> Config:
     return Config(engine="rust")
 
 
-def _sine_accel(freq_hz: float = 0.1, amplitude: float = 0.5,
-                duration_s: float = 30.0, fs: float = 50.0) -> np.ndarray:
+def _sine_accel(
+    freq_hz: float = 0.1,
+    amplitude: float = 0.5,
+    duration_s: float = 30.0,
+    fs: float = 50.0,
+) -> np.ndarray:
     """Generate a simple sinusoidal vertical-acceleration signal."""
     t = np.arange(0, duration_s, 1.0 / fs)
     return amplitude * np.sin(2.0 * math.pi * freq_hz * t)
@@ -61,8 +65,8 @@ def _sine_accel(freq_hz: float = 0.1, amplitude: float = 0.5,
 # 1. Engine selection                                                          #
 # --------------------------------------------------------------------------- #
 
-class TestEngineSelection:
 
+class TestEngineSelection:
     def test_python_engine_selected_by_default(self) -> None:
         assert selected_engine(DEFAULT_CONFIG) == "python"
 
@@ -100,8 +104,8 @@ class TestEngineSelection:
 # 2. Type compatibility                                                        #
 # --------------------------------------------------------------------------- #
 
-class TestTypeCompatibility:
 
+class TestTypeCompatibility:
     def test_engine_aliases_are_canonical_types(self) -> None:
         """EngineTrochoidalEstimate and EngineHeaveEstimate must be the
         canonical types from heave_estimator, not separate dataclasses."""
@@ -113,8 +117,14 @@ class TestTypeCompatibility:
         (heave_displacement, heave_amplitude, significant_height, heave_std,
          heave_max, heave_min, n_samples, converged, method)."""
         expected_names = [
-            "heave_displacement", "heave_amplitude", "significant_height",
-            "heave_std", "heave_max", "heave_min", "n_samples", "converged",
+            "heave_displacement",
+            "heave_amplitude",
+            "significant_height",
+            "heave_std",
+            "heave_max",
+            "heave_min",
+            "n_samples",
+            "converged",
             "method",
         ]
         actual_names = [f.name for f in fields(HeaveEstimate)]
@@ -125,8 +135,13 @@ class TestTypeCompatibility:
         (significant_height, wave_amplitude, wavelength, wave_speed,
          b_parameter, accel_max, frequency_hz, method)."""
         expected_names = [
-            "significant_height", "wave_amplitude", "wavelength",
-            "wave_speed", "b_parameter", "accel_max", "frequency_hz",
+            "significant_height",
+            "wave_amplitude",
+            "wavelength",
+            "wave_speed",
+            "b_parameter",
+            "accel_max",
+            "frequency_hz",
             "method",
         ]
         actual_names = [f.name for f in fields(TrochoidalEstimate)]
@@ -152,8 +167,8 @@ class TestTypeCompatibility:
 # 3. Python-engine trochoidal dispatch                                         #
 # --------------------------------------------------------------------------- #
 
-class TestTrochoidalDispatch:
 
+class TestTrochoidalDispatch:
     def test_basic_trochoidal_returns_canonical_type(self) -> None:
         result = trochoidal_wave_height(
             accel_max_observed=0.5,
@@ -193,8 +208,8 @@ class TestTrochoidalDispatch:
 # 4. Python-engine Kalman factory                                              #
 # --------------------------------------------------------------------------- #
 
-class TestKalmanFactory:
 
+class TestKalmanFactory:
     def test_make_kalman_returns_python_estimator(self) -> None:
         est = make_kalman_heave_estimator(_python_config())
         assert isinstance(est, KalmanHeaveEstimator)
@@ -235,8 +250,8 @@ class TestKalmanFactory:
 # 5. Python-engine combined estimation dispatch                                #
 # --------------------------------------------------------------------------- #
 
-class TestEstimateWavesDispatch:
 
+class TestEstimateWavesDispatch:
     def test_basic_wave_estimate(self) -> None:
         accel = _sine_accel(freq_hz=0.1, amplitude=0.5, duration_s=30.0)
         result = estimate_waves_from_accel(
@@ -299,6 +314,7 @@ class TestEstimateWavesDispatch:
 # 6. RustKalmanHeaveEstimator with mock module                                 #
 # --------------------------------------------------------------------------- #
 
+
 class TestRustKalmanHeaveEstimatorMock:
     """Test the wrapper class with a mocked Rust module."""
 
@@ -312,7 +328,15 @@ class TestRustKalmanHeaveEstimatorMock:
         mock_inner.n_processed = 10
         # get_estimate returns a tuple matching HeaveEstimate field order
         mock_inner.get_estimate.return_value = (
-            0.05, 0.1, 0.4, 0.1, 0.2, -0.15, 200, True, "kalman"
+            0.05,
+            0.1,
+            0.4,
+            0.1,
+            0.2,
+            -0.15,
+            200,
+            True,
+            "kalman",
         )
         mock_mod.PyKalmanHeaveEstimator.return_value = mock_inner
         return mock_mod
