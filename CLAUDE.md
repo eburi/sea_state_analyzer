@@ -105,11 +105,24 @@ python src/main.py replay --input output/20240601_120000/raw_self_deltas.jsonl -
 ## Running tests
 
 ```bash
-pip install pytest
+pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
 
 All tests live under `tests/`. `conftest.py` at the project root adds `src/` to `sys.path` automatically.
+
+### Optional Rust engine
+
+- The Python implementation remains the default and fallback engine.
+- The optional Rust engine is built as a PyO3 extension from `rust/` and exposed as the `sea_state_engine` Python module.
+- Runtime selection is controlled by `Config.engine` and `SEA_STATE_ENGINE` with allowed values `python` and `rust`.
+- If `engine="rust"` is requested but the extension is unavailable, callers must fall back gracefully to Python.
+- For local Rust-only verification:
+
+```bash
+/home/dev/.cargo/bin/cargo test --manifest-path rust/Cargo.toml
+PATH="/home/dev/.cargo/bin:$PATH" python3 -m maturin build --manifest-path rust/Cargo.toml
+```
 
 ---
 
@@ -172,7 +185,7 @@ There are two independent version numbers:
 
 ### App version — `sea_state_analyzer/config.yaml`
 
-The `version` field in `config.yaml` (currently `"1.1.0"`) is the **release version** of the Home Assistant app. Bump this for every software change that requires a new deployment or publishing of the app — bug fixes, new features, dependency updates, config changes, etc. This version should also be **tagged in git** (e.g. `git tag v1.1.0`).
+The `version` field in `config.yaml` (currently `"1.2.0"`) is the **release version** of the Home Assistant app. Bump this for every software change that requires a new deployment or publishing of the app — bug fixes, new features, dependency updates, config changes, etc. This version should also be **tagged in git** (e.g. `git tag v1.1.0`).
 
 ### Data/training version — `src/config.py` `VERSION`
 

@@ -37,6 +37,11 @@ class Config:
     # ------------------------------------------------------------------ #
     sample_rate_hz: float = 2.0  # canonical InstantSample rate
 
+    # Numerical engine selection for hot-path DSP code.
+    # `python` keeps the current pure-Python/scipy implementation.
+    # `rust` prefers the PyO3 extension module with Python fallback.
+    engine: str = "python"
+
     # ------------------------------------------------------------------ #
     # Rolling windows                                                      #
     # ------------------------------------------------------------------ #
@@ -281,6 +286,10 @@ class Config:
         sr = _env_float("SAMPLE_RATE_HZ")
         if sr is not None:
             kwargs["sample_rate_hz"] = sr
+
+        engine = _env("ENGINE")
+        if engine:
+            kwargs["engine"] = engine.lower()
 
         ie = _env_bool("IMU_ENABLED")
         if ie is not None:

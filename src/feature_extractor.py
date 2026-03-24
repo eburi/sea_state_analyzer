@@ -26,6 +26,10 @@ from scipy import signal as scipy_signal
 from scipy.stats import kurtosis as scipy_kurtosis
 
 from config import Config, DEFAULT_CONFIG
+from engine import (
+    make_kalman_heave_estimator,
+    selected_engine as selected_runtime_engine,
+)
 from models import InstantSample, LayerAFeatures, MotionEstimate, WindowFeatures
 from scales import (
     classify_beaufort,
@@ -35,11 +39,7 @@ from scales import (
 
 # Heave/wave height estimation (optional -- degrades gracefully if unavailable)
 try:
-    from heave_estimator import (
-        KalmanHeaveEstimator,
-        WaveEstimate,  # noqa: F401
-        estimate_waves_from_accel,
-    )
+    from heave_estimator import WaveEstimate  # noqa: F401
 
     _HEAVE_AVAILABLE = True
 except ImportError:
@@ -369,6 +369,7 @@ class FeatureExtractor:
     ) -> None:
         self._config = config
         self._fs = config.sample_rate_hz
+        self._engine = selected_runtime_engine(config)
 
         # Hull parameters for Phase 2 corrections (None = use defaults)
         self._hull_params: Optional[Any] = hull_params if _HULL_AVAILABLE else None
@@ -428,14 +429,7 @@ class FeatureExtractor:
         self._kalman_heave: Optional[Any] = None
         self._latest_wave_estimate: Optional[Any] = None
         if _HEAVE_AVAILABLE:
-            self._kalman_heave = KalmanHeaveEstimator(
-                dt=1.0 / imu_fs,
-                pos_integral_trans_var=config.heave_kalman_pos_integral_trans_var,
-                pos_trans_var=config.heave_kalman_pos_trans_var,
-                vel_trans_var=config.heave_kalman_vel_trans_var,
-                pos_integral_obs_var=config.heave_kalman_pos_integral_obs_var,
-                accel_bias_window=config.heave_kalman_bias_window,
-            )
+            self._kalman_heave = make_kalman_heave_estimator(config)
 
     # ------------------------------------------------------------------ #
     # Layer A                                                              #
@@ -922,7 +916,9 @@ class FeatureExtractor:
         # Run combined wave estimation
         # NOTE: Do NOT pass the Kalman estimator here — it is already being
         # updated in real-time via add_imu_accel().  We just query its state.
-        wave_est = estimate_waves_from_accel(
+        from engine import estimate_waves_from_accel as engine_estimate_waves_from_accel
+
+        wave_est = engine_estimate_waves_from_accel(
             vertical_accel=accel_data,
             fs=self._accel_fs,
             delta_v=delta_v,
@@ -933,6 +929,7 @@ class FeatureExtractor:
             freq_max_hz=self._config.heave_freq_max_hz,
             trochoidal_min_amplitude=self._config.heave_trochoidal_min_amplitude,
             hull_params=self._hull_params if _HULL_AVAILABLE else None,
+            config=self._config,
         )
 
         # Overlay Kalman heave results if the filter has converged

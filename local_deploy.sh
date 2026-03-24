@@ -38,6 +38,13 @@ cp "$ADDON_DIR/run.sh" "$BUILD_DIR/"
 cp -r "$PROJECT_DIR/src" "$BUILD_DIR/src"
 find "$BUILD_DIR/src" -type d -name '__pycache__' -exec rm -rf {} +
 
+# Copy Rust engine source (required by Dockerfile for optional Rust build)
+if [ -d "$PROJECT_DIR/rust" ]; then
+    cp -r "$PROJECT_DIR/rust" "$BUILD_DIR/rust"
+    # Remove build artifacts to keep the deploy payload small
+    rm -rf "$BUILD_DIR/rust/target"
+fi
+
 echo "Assembled addon in $BUILD_DIR:"
 ls -la "$BUILD_DIR/"
 echo ""

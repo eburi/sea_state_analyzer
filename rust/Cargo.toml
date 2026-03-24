@@ -1,0 +1,19 @@
+[package]
+name = "sea_state_engine"
+version = "0.1.0"
+edition = "2021"
+description = "Rust DSP engine for sea_state_analyzer (PyO3 extension)"
+
+[lib]
+name = "sea_state_engine"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+numpy = "0.22"
+realfft = "3"
+rustfft = "6"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
