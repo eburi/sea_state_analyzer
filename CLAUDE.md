@@ -1,5 +1,7 @@
 # Copilot Instructions – sea_state_analyzer
 
+> **Compatibility note:** The canonical agent-agnostic harness entry points are now [`AGENT.md`](AGENT.md) and [`harness/README.md`](harness/README.md). This file remains useful detailed project context for tools that auto-load `CLAUDE.md`, but source precedence now lives in `AGENT.md`.
+
 ## Project overview
 
 `sea_state_analyzer` is a Python 3.11+ prototype that connects to a Signal K marine server (`http://primrose.local:3000`), ingests **vessel self data only**, and derives inferred sea-state motion proxies from onboard attitude, movement, and wind sensors.
@@ -185,7 +187,7 @@ There are two independent version numbers:
 
 ### App version — `sea_state_analyzer/config.yaml`
 
-The `version` field in `config.yaml` (currently `"1.2.0"`) is the **release version** of the Home Assistant app. Bump this for every software change that requires a new deployment or publishing of the app — bug fixes, new features, dependency updates, config changes, etc. This version should also be **tagged in git** (e.g. `git tag v1.1.0`).
+The `version` field in `config.yaml` (currently `"1.2.1"`) is the **release version** of the Home Assistant app. Bump this for every software change that requires a new deployment or publishing of the app — bug fixes, new features, dependency updates, config changes, etc. This version should also be **tagged in git** (e.g. `git tag v1.1.0`).
 
 ### Data/training version — `src/config.py` `VERSION`
 
