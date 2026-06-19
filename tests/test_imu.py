@@ -16,20 +16,19 @@ import pytest
 
 # Import the module under test
 from imu_reader import (
+    _ACCEL_CONFIG,
+    _ACCEL_XOUT_H,
+    _BANK_SEL,
+    _CHIP_ID,
+    _EXT_SLV_SENS_DATA_00,
+    _GRAVITY,
+    _GYRO_CONFIG_1,
+    _TEMP_OUT_H,
+    _WHO_AM_I,
     IMUReader,
     IMUSample,
     _ICM20948Driver,
-    _CHIP_ID,
-    _GRAVITY,
-    _WHO_AM_I,
-    _BANK_SEL,
-    _ACCEL_XOUT_H,
-    _ACCEL_CONFIG,
-    _GYRO_CONFIG_1,
-    _EXT_SLV_SENS_DATA_00,
-    _TEMP_OUT_H,
 )
-
 
 # --------------------------------------------------------------------------- #
 # Fake SMBus                                                                   #
@@ -930,9 +929,11 @@ class TestConfigIMUFields:
 
 
 class TestIMUMerge:
-    def test_merge_overlays_imu_onto_sample(self) -> None:
-        """Merging an IMUSample onto an InstantSample should set IMU fields."""
+    def test_merge_overlays_local_imu_onto_signalk_sample(self) -> None:
+        """Local IMU channels should overlay without replacing Signal K attitude."""
+        from config import Config
         from models import InstantSample
+        from sample_merge import merge_local_imu_sample
 
         now = datetime.now(timezone.utc)
 
@@ -940,6 +941,7 @@ class TestIMUMerge:
             timestamp=now,
             roll=0.1,
             pitch=0.05,
+            yaw=1.2,
         )
         imu = IMUSample(
             timestamp=now,
@@ -954,41 +956,43 @@ class TestIMUMerge:
             mag_z=-7.5,
         )
 
-        # Simulate what _merge_imu does
-        sample.accel_x = imu.accel_x
-        sample.accel_y = imu.accel_y
-        sample.accel_z = imu.accel_z
-        sample.gyro_x = imu.gyro_x
-        sample.gyro_y = imu.gyro_y
-        sample.gyro_z = imu.gyro_z
-        sample.mag_x = imu.mag_x
-        sample.mag_y = imu.mag_y
-        sample.mag_z = imu.mag_z
-        sample.vertical_accel = imu.vertical_accel
+        merged = merge_local_imu_sample(sample, imu, Config())
 
-        # Signal K fields preserved
-        assert sample.roll == 0.1
-        assert sample.pitch == 0.05
-        # IMU fields set
-        assert sample.accel_x == 0.1
-        assert sample.accel_z == 9.81
-        assert sample.gyro_z == 0.005
-        assert sample.mag_x == 15.0
-        assert abs(sample.vertical_accel) < 0.01  # ~0 at rest
+        # Signal K attitude preserved
+        assert merged.roll == 0.1
+        assert merged.pitch == 0.05
+        assert merged.yaw == 1.2
+        # Local IMU fields set
+        assert merged.accel_x == 0.1
+        assert merged.accel_z == 9.81
+        assert merged.gyro_z == 0.005
+        assert merged.mag_x == 15.0
+        assert abs(merged.vertical_accel) < 0.01  # ~0 at rest
+        assert merged.field_valid["imu"] is True
 
-    def test_merge_no_imu_leaves_none(self) -> None:
-        """Without IMU data, IMU fields should remain None."""
+    def test_merge_without_local_imu_falls_back_to_signalk_attitude(self) -> None:
+        """When no local IMU exists, keep Signal K navigation.attitude values."""
+        from config import Config
         from models import InstantSample
+        from sample_merge import merge_local_imu_sample
 
         now = datetime.now(timezone.utc)
 
         sample = InstantSample(
             timestamp=now,
             roll=0.1,
+            pitch=-0.05,
+            yaw=1.8,
         )
-        # No merge
-        assert sample.accel_x is None
-        assert sample.vertical_accel is None
+
+        merged = merge_local_imu_sample(sample, None, Config())
+
+        assert merged.roll == 0.1
+        assert merged.pitch == -0.05
+        assert merged.yaw == 1.8
+        assert merged.accel_x is None
+        assert merged.vertical_accel is None
+        assert "imu" not in merged.field_valid
 
 
 # --------------------------------------------------------------------------- #

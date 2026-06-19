@@ -29,10 +29,19 @@ fn compute_delta_v(stw: Option<f64>, wind_angle_true: Option<f64>) -> Option<f64
     doppler::compute_delta_v(stw, wind_angle_true)
 }
 
+fn should_use_signalk_attitude_impl(local_imu_present: bool) -> bool {
+    !local_imu_present
+}
+
 #[pyfunction]
 #[pyo3(signature = (delta_v=None, stw=None))]
 fn classify_wave_heading(delta_v: Option<f64>, stw: Option<f64>) -> Option<String> {
     doppler::classify_wave_heading(delta_v, stw).map(|s| s.to_string())
+}
+
+#[pyfunction]
+fn should_use_signalk_attitude(local_imu_present: bool) -> bool {
+    should_use_signalk_attitude_impl(local_imu_present)
 }
 
 #[pyfunction]
@@ -146,7 +155,23 @@ fn sea_state_engine(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(doppler_correct, m)?)?;
     m.add_function(wrap_pyfunction!(compute_delta_v, m)?)?;
     m.add_function(wrap_pyfunction!(classify_wave_heading, m)?)?;
+    m.add_function(wrap_pyfunction!(should_use_signalk_attitude, m)?)?;
     m.add_function(wrap_pyfunction!(trochoidal_wave_height, m)?)?;
     m.add_class::<PyKalmanHeaveEstimator>()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_use_signalk_attitude_impl;
+
+    #[test]
+    fn test_should_use_signalk_attitude_without_local_imu() {
+        assert!(should_use_signalk_attitude_impl(false));
+    }
+
+    #[test]
+    fn test_should_not_use_signalk_attitude_with_local_imu() {
+        assert!(!should_use_signalk_attitude_impl(true));
+    }
 }

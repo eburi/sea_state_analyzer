@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 
-from config import Config, DEFAULT_CONFIG
+from config import DEFAULT_CONFIG, Config
 from engine import (
     EngineHeaveEstimate,
     EngineTrochoidalEstimate,
@@ -25,6 +25,7 @@ from engine import (
     make_kalman_heave_estimator,
     rust_engine_available,
     selected_engine,
+    should_use_signalk_attitude,
     trochoidal_wave_height,
 )
 from heave_estimator import (
@@ -33,7 +34,6 @@ from heave_estimator import (
     TrochoidalEstimate,
     WaveEstimate,
 )
-
 
 # --------------------------------------------------------------------------- #
 # Helpers                                                                      #
@@ -98,6 +98,18 @@ class TestEngineSelection:
         mock_mod = MagicMock()
         with patch("engine._load_rust_module", return_value=mock_mod):
             assert rust_engine_available() is True
+
+    def test_should_use_signalk_attitude_python_fallback(self) -> None:
+        with patch("engine._load_rust_module", return_value=None):
+            assert should_use_signalk_attitude(False, _rust_config()) is True
+            assert should_use_signalk_attitude(True, _rust_config()) is False
+
+    def test_should_use_signalk_attitude_uses_rust_helper_when_available(self) -> None:
+        mock_mod = MagicMock()
+        mock_mod.should_use_signalk_attitude.return_value = True
+        with patch("engine._load_rust_module", return_value=mock_mod):
+            assert should_use_signalk_attitude(False, _rust_config()) is True
+        mock_mod.should_use_signalk_attitude.assert_called_once_with(False)
 
 
 # --------------------------------------------------------------------------- #

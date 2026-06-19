@@ -39,19 +39,20 @@ from models import (
     SystemStatus,
     WindowFeatures,
 )
-from plotter import FilePlotter, TerminalPlotter
 from paths import WAVE_PATH_META
+from plotter import FilePlotter, TerminalPlotter
 from recorder import Recorder
+from sample_merge import merge_local_imu_sample
 from signalk_client import InspectClient, SignalKClient
 from state_store import SelfStateStore
 
 # Try importing vessel design module
 try:
     from vessel_config import (
+        HullParameters,
         compute_hull_parameters,
         fetch_vessel_design,
         log_hull_parameters,
-        HullParameters,
     )
 
     _VESSEL_CONFIG_AVAILABLE = True
@@ -133,7 +134,8 @@ async def _live_mode(config: Config) -> None:
 
     When IMU hardware is available, reads accelerometer/gyroscope at
     imu_sample_rate_hz and merges the latest reading into each
-    InstantSample.
+    InstantSample. If no local IMU is found, the pipeline falls back to
+    Signal K `navigation.attitude` for roll/pitch/yaw.
     """
     output_dir = config.dated_output_dir()
     logger.info("Output directory: %s", output_dir)
@@ -319,11 +321,17 @@ async def _live_mode(config: Config) -> None:
                 duration_s=10.0, rate_hz=config.imu_sample_rate_hz
             )
         else:
-            logger.info("IMU not available – continuing without accelerometer data")
+            logger.info(
+                "Local IMU not available – falling back to Signal K "
+                "navigation.attitude for roll/pitch/yaw"
+            )
     elif not _IMU_AVAILABLE:
-        logger.info("smbus2 not installed – IMU support disabled")
+        logger.info(
+            "smbus2 not installed – local IMU support disabled; using "
+            "Signal K navigation.attitude"
+        )
     else:
-        logger.info("IMU disabled in config")
+        logger.info("IMU disabled in config – using Signal K navigation.attitude")
 
     delta_queue: asyncio.Queue[SignalKValueUpdate] = asyncio.Queue(
         maxsize=config.delta_queue_maxsize
@@ -380,27 +388,6 @@ async def _live_mode(config: Config) -> None:
                     logger.warning("IMU read error (#%d): %s", consecutive_errors, exc)
             await asyncio.sleep(interval)
 
-    def _merge_imu(sample: InstantSample) -> InstantSample:
-        """Overlay latest IMU data onto an InstantSample (in-place mutation)."""
-        imu = latest_imu_sample
-        if imu is None:
-            return sample
-        sample.accel_x = imu.accel_x
-        sample.accel_y = imu.accel_y
-        sample.accel_z = imu.accel_z
-        sample.gyro_x = imu.gyro_x
-        sample.gyro_y = imu.gyro_y
-        sample.gyro_z = imu.gyro_z
-        sample.mag_x = imu.mag_x
-        sample.mag_y = imu.mag_y
-        sample.mag_z = imu.mag_z
-        sample.vertical_accel = imu.vertical_accel
-        # Track IMU freshness
-        imu_age = (sample.timestamp - imu.timestamp).total_seconds()
-        sample.field_ages["imu"] = imu_age
-        sample.field_valid["imu"] = imu_age < config.stale_threshold_s
-        return sample
-
     async def _sample_loop() -> None:
         """Produce InstantSamples at the configured rate."""
         nonlocal samples_produced, last_sample, last_me, last_wf_short
@@ -409,8 +396,9 @@ async def _live_mode(config: Config) -> None:
             await asyncio.sleep(interval)
             sample = store.snapshot()
 
-            # Merge latest IMU reading (if available)
-            _merge_imu(sample)
+            # Merge local IMU sensor channels when available. Otherwise,
+            # keep the Signal K navigation.attitude snapshot unchanged.
+            merge_local_imu_sample(sample, latest_imu_sample, config)
 
             last_sample = sample
             samples_produced += 1

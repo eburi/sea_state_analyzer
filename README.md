@@ -1,11 +1,12 @@
 # sea_state_analyzer – Signal K Wave State Monitor
 
-A Python application that connects to a Signal K marine server, reads an
-onboard IMU (ICM-20948 accelerometer/gyroscope/magnetometer), estimates wave
-conditions including multi-component spectral partitioning (wind-wave, swell 1,
-swell 2), and publishes wave estimates back to Signal K.  Designed to run on
-**bare Raspbian OS / OpenPlotter** or as a **Home Assistant App** on a
-Raspberry Pi 5.
+A Python application that connects to a Signal K marine server, prefers a
+local onboard IMU (ICM-20948 accelerometer/gyroscope/magnetometer) when
+available, falls back to Signal K `navigation.attitude` when no local IMU is
+found, estimates wave conditions including multi-component spectral
+partitioning (wind-wave, swell 1, swell 2), and publishes wave estimates back
+to Signal K. Designed to run on **bare Raspbian OS / OpenPlotter** or as a
+**Home Assistant App** on a Raspberry Pi 5.
 
 > **Domain caution:** Wave height, period, and partition outputs are **estimated
 > from vessel motion** using Kalman-filtered heave, Doppler correction, hull
@@ -27,8 +28,10 @@ src/
   signalk_auth.py      – Signal K device access request flow + JWT token persistence
   signalk_publisher.py – Delta/meta building for publishing wave estimates back to Signal K
   state_store.py       – latest-known self-state, freshness tracking, InstantSample snapshots
+  sample_merge.py      – local IMU overlay + Signal K attitude fallback logic
   feature_extractor.py – Layer A (derivatives), Layer B (rolling stats/PSD), Layer C (inferred proxies)
   heave_estimator.py   – Kalman heave filter, trochoidal Hs, Doppler correction, spectral partitioning
+  engine.py            – Python/Rust engine selection and parity helpers
   vessel_config.py     – Hull parameters, RAO gain model, hull classification
   imu_registry.py      – IMU chip registry (WHO_AM_I values, I2C addresses)
   imu_detect.py        – I2C bus scanning and chip identification
@@ -36,7 +39,9 @@ src/
   recorder.py          – batched JSONL + Parquet output
   plotter.py           – console summaries + optional matplotlib PNGs
   main.py              – CLI entry point: live / inspect / replay modes
-tests/                 – pytest unit tests (699 tests)
+rust/                  – optional PyO3 Rust engine and Docker-based validation tooling
+scripts/               – helper scripts, including Docker Rust validation
+tests/                 – pytest unit tests
 conftest.py            – adds src/ to sys.path for pytest
 sea_state_analyzer/    – Home Assistant App packaging (config.yaml, Dockerfile, run.sh)
 ```
@@ -68,7 +73,10 @@ curl http://homeassistant.local:3000/signalk
 
 ### Live mode (default)
 
-Connect to the Signal K server and start ingesting vessel self data:
+Connect to the Signal K server and start ingesting vessel self data.
+
+Live mode prefers local IMU accelerometer/gyro data when available, but keeps
+working without it by using Signal K `navigation.attitude` for roll/pitch/yaw:
 
 ```bash
 python src/main.py
@@ -194,12 +202,18 @@ partition or filter data by the version that produced it.
 ### IMU integration
 
 The ICM-20948 9-DOF IMU (accelerometer + gyroscope + magnetometer) is read
-directly over I2C at 25 Hz.  The IMU is mounted vertically on a wall; gravity
-calibration uses dot-product projection to determine the gravity axis
-automatically regardless of mounting orientation.
+directly over I2C at 25 Hz when present. The IMU is mounted vertically on a
+wall; gravity calibration uses dot-product projection to determine the gravity
+axis automatically regardless of mounting orientation.
 
-Vertical acceleration is extracted by subtracting the gravity component,
-then fed into the heave estimation pipeline.
+If no local IMU is found, live mode falls back to Signal K
+`navigation.attitude` for roll/pitch/yaw so the attitude-driven motion pipeline
+continues to run. In that fallback mode, accelerometer-derived heave and wave
+height outputs are naturally unavailable unless another local accelerometer path
+is added later.
+
+Vertical acceleration is extracted by subtracting the gravity component, then
+fed into the heave estimation pipeline.
 
 ### Heave estimation (Kalman filter)
 
@@ -300,11 +314,11 @@ There are two independent version numbers:
 
 ### App version — `sea_state_analyzer/config.yaml`
 
-The `version` field in `config.yaml` (currently `"1.1.0"`) is the **release
+The `version` field in `config.yaml` (currently `"1.2.1"`) is the **release
 version** of the Home Assistant app. Bump this for every software change that
 requires a new deployment or publishing of the app — bug fixes, new features,
 dependency updates, config changes, etc. This version should also be **tagged
-in git** (e.g. `git tag v1.1.0`).
+in git** (e.g. `git tag v1.2.1`).
 
 ### Data/training version — `src/config.py` `VERSION`
 
@@ -393,6 +407,18 @@ pytest tests/ -v
 # conftest.py at the project root adds src/ to sys.path automatically.
 ```
 
+### Optional Rust engine validation
+
+The optional Rust engine mirrors the Signal K attitude fallback rule as well:
+when no local IMU sample is present, the runtime keeps Signal K
+`navigation.attitude` as the active attitude source.
+
+To validate the Rust crate and build the PyO3 extension in Docker:
+
+```bash
+scripts/validate_rust_docker.sh
+```
+
 ---
 
 ## Assumptions and limitations
@@ -400,6 +426,7 @@ pytest tests/ -v
 - **Vessel self only.** No other vessel data is used.
 - **Indirect wave inference.** Wave height, direction, and period are not directly observable from attitude sensors alone.
 - **Sensor availability varies.** Run inspect mode first to see which paths are actually present on your installation.
+- **Attitude fallback is supported.** Without a local IMU, the app continues with Signal K `navigation.attitude`, but IMU-only outputs such as local vertical acceleration and Kalman heave are unavailable.
 - **Sampling rate.** 2 Hz is sufficient for roll/pitch periods > 2 s but will miss short-period chop.
 - **Bias.** A dataset collected entirely downwind or during calms will produce biased learned regimes.
 - **Autopilot.** Autopilot corrections affect yaw-rate and may create artefacts in period estimates.
@@ -513,7 +540,8 @@ The app packaging lives in `sea_state_analyzer/` with:
 - Default data paths use `~/.sea_state_analyzer/` in the user's home directory, so the app works on bare Raspbian without any environment variable overrides.
 - The HA `run.sh` overrides paths to HA-specific locations (`/data/`, `/share/`).
 - JWT token persisted at `~/.sea_state_analyzer/signalk_token.json` (or `/data/signalk_token.json` on HA).
-- Graceful degradation: works on macOS without IMU (attitude-only estimation).
+- Graceful degradation: works without a local IMU by falling back to Signal K `navigation.attitude` for roll/pitch/yaw.
+- The optional Rust engine implements the same fallback rule so Python and Rust-selected runs behave consistently.
 
 ---
 
@@ -544,6 +572,8 @@ What sea_state_analyzer **implements**:
 - Multi-peak spectral partitioning (wind-wave, swell 1, swell 2)
 - RAO-aware confidence adjustment based on hull parameters
 - Classification pipeline (severity, regime, direction, regularity, comfort, trend)
+- Signal K attitude fallback when no local IMU is found
+- Optional Rust engine parity for wave/heave helpers and attitude-fallback decision logic
 - Signal K publishing with meta deltas for dashboard integration
 - Position recording on every estimate for forecast comparison
 

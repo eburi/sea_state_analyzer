@@ -12,7 +12,7 @@ import logging
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
-from config import Config, DEFAULT_CONFIG
+from config import DEFAULT_CONFIG, Config
 from heave_estimator import HeaveEstimate, TrochoidalEstimate
 
 if TYPE_CHECKING:
@@ -48,6 +48,23 @@ def get_rust_module(config: Config = DEFAULT_CONFIG) -> Any | None:
     if config.engine != "rust":
         return None
     return _load_rust_module()
+
+
+def should_use_signalk_attitude(
+    local_imu_present: bool,
+    config: Config = DEFAULT_CONFIG,
+) -> bool:
+    """Return whether Signal K attitude should remain the active source.
+
+    For now, the rule is simple: keep Signal K ``navigation.attitude`` when
+    no local IMU sample is available. When the Rust engine is selected and the
+    extension is available, defer to the Rust helper so both paths stay in
+    lockstep.
+    """
+    module = get_rust_module(config)
+    if module is not None and hasattr(module, "should_use_signalk_attitude"):
+        return bool(module.should_use_signalk_attitude(local_imu_present))
+    return not local_imu_present
 
 
 class RustKalmanHeaveEstimator:
