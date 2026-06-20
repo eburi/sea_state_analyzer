@@ -9,30 +9,64 @@ on:
 
 jobs:
   build:
-    name: Build add-on
+    name: Build add-on (${{ matrix.arch }})
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: aarch64
+            platform: linux/arm64
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
 
+      - name: Copy src and rust into add-on directory
+        run: |
+          rm -rf sea_state_analyzer/src sea_state_analyzer/rust
+          cp -r src sea_state_analyzer/src
+          cp -r rust sea_state_analyzer/rust
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Login to Container Registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Copy src and rust into add-on directory
-        run: |
-          cp -r src sea_state_analyzer/src
-          cp -r rust sea_state_analyzer/rust
-
-      - name: Build and push
-        uses: home-assistant/builder@2026.02.1
+      - name: Build add-on image
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@v6
         with:
-          args: |
-            --amd64 --aarch64 \
-            --target sea_state_analyzer
+          context: ./sea_state_analyzer
+          file: ./sea_state_analyzer/Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: false
+          build-args: |
+            BUILD_FROM=ghcr.io/home-assistant/base:latest
+
+      - name: Build and push add-on image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: ./sea_state_analyzer
+          file: ./sea_state_analyzer/Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/sea_state_analyzer/${{ matrix.arch }}:${{ github.ref_name }}
+            ghcr.io/${{ github.repository_owner }}/sea_state_analyzer/${{ matrix.arch }}:latest
+          build-args: |
+            BUILD_FROM=ghcr.io/home-assistant/base:latest

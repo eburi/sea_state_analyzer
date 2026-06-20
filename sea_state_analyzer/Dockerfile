@@ -1,4 +1,4 @@
-ARG BUILD_FROM
+ARG BUILD_FROM=ghcr.io/home-assistant/base:latest
 
 # ---- Builder stage: compile the Rust extension ---- #
 FROM $BUILD_FROM AS builder
