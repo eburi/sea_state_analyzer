@@ -1,6 +1,6 @@
 ARG BUILD_FROM=ghcr.io/home-assistant/base:latest
 
-# ---- Builder stage: compile the Rust extension ---- #
+# ---- Builder stage: best-effort compile of the optional Rust extension ---- #
 FROM $BUILD_FROM AS builder
 
 RUN apk add --no-cache \
@@ -14,10 +14,14 @@ RUN apk add --no-cache \
 RUN pip3 install --no-cache-dir --break-system-packages 'maturin[patchelf]'
 
 COPY rust/ /tmp/rust/
-RUN cd /tmp/rust \
-    && maturin build --release \
-    && mkdir -p /tmp/wheels \
-    && cp target/wheels/*.whl /tmp/wheels/
+RUN mkdir -p /tmp/wheels \
+    && if cd /tmp/rust \
+        && PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1 maturin build --release \
+        && cp target/wheels/*.whl /tmp/wheels/; then \
+         echo "Rust extension wheel built successfully"; \
+       else \
+         echo "Rust extension build failed; continuing with Python fallback"; \
+       fi
 
 # ---- Runtime stage: lean final image ---- #
 FROM $BUILD_FROM
@@ -37,9 +41,15 @@ COPY requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
 
-# Install the pre-built Rust engine wheel from the builder stage
+# Install the pre-built Rust engine wheel when available.
+# The Python engine remains the default and fallback if the optional Rust build
+# is unavailable for the base image's Python/toolchain combination.
 COPY --from=builder /tmp/wheels/ /tmp/wheels/
-RUN pip3 install --no-cache-dir --break-system-packages /tmp/wheels/*.whl \
+RUN if ls /tmp/wheels/*.whl >/dev/null 2>&1; then \
+      pip3 install --no-cache-dir --break-system-packages /tmp/wheels/*.whl; \
+    else \
+      echo "No Rust wheel available; using Python engine fallback"; \
+    fi \
     && rm -rf /tmp/wheels
 
 # Copy application source

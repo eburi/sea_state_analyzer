@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.3] - 2026-06-20
+
+### Changed
+- Make the Home Assistant add-on image treat the Rust extension as a best-effort optional build so newer base-image Python versions do not block releases.
+- Use `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` when attempting the optional Rust wheel build inside the add-on image builder stage.
+- Fall back to the Python engine automatically in the add-on image when no Rust wheel is produced.
+
+### Notes
+- The app/add-on version is bumped to `1.2.3` in `sea_state_analyzer/config.yaml`.
+- The data/training version in `src/config.py` remains `0.3.0` because this release does not change the output schema.
+
 ## [1.2.2] - 2026-06-20
 
 ### Changed
@@ -9,6 +20,7 @@ All notable changes to this project will be documented in this file.
 - Align local and CI validation on shared `make` targets (`lint`, `format-check`, `test`, `gates`, `ci`).
 - Update GitHub Actions usage and keep release-image publishing on pushed release tags only.
 - Slim `CLAUDE.md` down to a legacy compatibility note and turn `inctructions.md` into an obsolete pointer to canonical docs.
+- Make add-on image packaging tolerate optional Rust wheel build failures and continue with the Python engine fallback on newer base-image Python versions.
 
 ### Added
 - Root `Makefile` for real local gate commands.

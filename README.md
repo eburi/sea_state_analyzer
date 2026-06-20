@@ -314,11 +314,11 @@ There are two independent version numbers:
 
 ### App version — `sea_state_analyzer/config.yaml`
 
-The `version` field in `config.yaml` (currently `"1.2.2"`) is the **release
+The `version` field in `config.yaml` (currently `"1.2.3"`) is the **release
 version** of the Home Assistant app. Bump this for every software change that
 requires a new deployment or publishing of the app — bug fixes, new features,
 dependency updates, config changes, etc. This version should also be **tagged
-in git** (e.g. `git tag v1.2.2`).
+in git** (e.g. `git tag v1.2.3`).
 
 ### Data/training version — `src/config.py` `VERSION`
 
