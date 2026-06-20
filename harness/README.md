@@ -31,7 +31,7 @@ Repo-local adaptations to the course baseline are recorded in [`conventions.md`]
 | 3 | [`docs/plan/planning/in-progress/roadmap.md`](../docs/plan/planning/in-progress/roadmap.md) | current planning direction |
 | 4 | [`docs/reviews/`](../docs/reviews/) | review context and known risks |
 | 5 | [`README.md`](../README.md) | project overview and operator-facing usage |
-| 6 | [`CLAUDE.md`](../CLAUDE.md) | legacy detailed project context |
+| 6 | [`CLAUDE.md`](../CLAUDE.md) | legacy compatibility notes for tools that auto-load it |
 | 7 | [`AGENT.md`](../AGENT.md) | repo-wide agent briefing |
 | 8 | this file | harness entry point |
 

@@ -2,7 +2,7 @@
 
 This is the canonical onboarding brief for any coding agent working in this repository.
 
-It is intentionally **agent-agnostic**. `AGENTS.md` exists only as a compatibility shim for tools that auto-load that filename. `CLAUDE.md` remains a useful detailed project context source, but it is no longer the canonical harness entry point.
+It is intentionally **agent-agnostic**. `AGENTS.md` exists only as a compatibility shim for tools that auto-load that filename. `CLAUDE.md` remains a thin legacy compatibility note for tools that auto-load it, but it is no longer the canonical harness entry point.
 
 This repo adopts the AI harness course approach from `pt9912/ai-harness-course`, pinned in `harness/conventions.md` to a concrete upstream revision.
 
@@ -30,7 +30,7 @@ When sources disagree, use this order:
 3. `docs/plan/planning/in-progress/roadmap.md`.
 4. `docs/reviews/` — advisory, but required context for non-trivial work; start with the latest report.
 5. `README.md`.
-6. `CLAUDE.md` — legacy detailed project context and constraints; useful, but may lag.
+6. `CLAUDE.md` — legacy compatibility notes for tools that auto-load it; intentionally minimal and non-canonical.
 7. `AGENT.md`.
 8. `harness/README.md`.
 
@@ -101,7 +101,7 @@ These are the real local gates. If a command is listed here, it must exist in `M
 - Reference concrete files, sections, commands, and behaviors instead.
 - Use `MR-*` IDs from `harness/conventions.md` and `ADR-*` IDs once real ADRs exist.
 - Keep review reports append-only: new run, new file.
-- `CLAUDE.md` is still useful for detailed project context, but changes that make it drift further should be avoided.
+- `CLAUDE.md` should stay thin. Do not duplicate guidance there that belongs in `AGENT.md`, `harness/README.md`, `README.md`, code, or tests.
 
 ## 6. Minimal agent workflow
 

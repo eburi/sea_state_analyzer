@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.2] - 2026-06-20
+
+### Changed
+- Bootstrap an agent-agnostic harness with canonical `AGENT.md`, `harness/README.md`, review/planning scaffolding, and a repo-specific reviewer skill.
+- Align local and CI validation on shared `make` targets (`lint`, `format-check`, `test`, `gates`, `ci`).
+- Update GitHub Actions usage and keep release-image publishing on pushed release tags only.
+- Slim `CLAUDE.md` down to a legacy compatibility note and turn `inctructions.md` into an obsolete pointer to canonical docs.
+
+### Added
+- Root `Makefile` for real local gate commands.
+- `docs/reviews/2026-06-19-initial-code-review.md` as the initial review-first artifact.
+- `docs/plan/` and `harness/` bootstrap structure for brownfield harness adoption.
+
+### Notes
+- The app/add-on version is bumped to `1.2.2` in `sea_state_analyzer/config.yaml`.
+- The data/training version in `src/config.py` remains `0.3.0` because this release does not change the output schema.
+
 ## [1.2.1] - 2026-06-19
 
 ### Changed

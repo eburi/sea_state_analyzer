@@ -94,7 +94,7 @@ When this file conflicts with a higher-precedence source, the higher-precedence 
 | `harness/` | Greenfield | newly bootstrapped harness surface | n/a |
 | `docs/plan/` | Greenfield | planning/ADR structure is newly bootstrapped | n/a |
 | `docs/reviews/` | Greenfield | review archive starts with initial report | n/a |
-| `CLAUDE.md` | Hybrid | valuable detailed context, but currently partly legacy/drift-prone | keep aligned or progressively deprecate in favor of harness docs |
+| `CLAUDE.md` | Hybrid | legacy tool-specific compatibility surface kept intentionally thin to avoid doc drift | keep it minimal or deprecate fully once no tooling depends on it |
 
 ## Glossary
 

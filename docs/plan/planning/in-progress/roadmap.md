@@ -14,8 +14,8 @@ It is **directional**, not a replacement for code/tests as the current behaviora
 
 ### 2. Documentation convergence
 
-- reduce drift between `README.md`, `CLAUDE.md`, and legacy docs,
-- decide the fate of `inctructions.md`,
+- keep `README.md` and harness docs canonical,
+- keep `CLAUDE.md` and `inctructions.md` as thin compatibility pointers rather than parallel specs,
 - ensure release/build workflow behavior is documented once, correctly.
 
 ### 3. Maintainability hotspot reduction
