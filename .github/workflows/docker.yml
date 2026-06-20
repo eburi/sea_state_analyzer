@@ -57,6 +57,11 @@ jobs:
           build-args: |
             BUILD_FROM=ghcr.io/home-assistant/base:latest
 
+      - name: Derive release image version
+        if: github.event_name != 'pull_request'
+        id: meta
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push add-on image
         if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
@@ -66,6 +71,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           push: true
           tags: |
+            ghcr.io/${{ github.repository_owner }}/sea_state_analyzer/${{ matrix.arch }}:${{ steps.meta.outputs.version }}
             ghcr.io/${{ github.repository_owner }}/sea_state_analyzer/${{ matrix.arch }}:${{ github.ref_name }}
             ghcr.io/${{ github.repository_owner }}/sea_state_analyzer/${{ matrix.arch }}:latest
           build-args: |
